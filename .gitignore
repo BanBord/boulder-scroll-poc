@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+.venv/
+
+# Videos & large binaries (too big for git)
+*.mp4
+*.mov
+*.avi
+*.mkv
+
+# YOLO model weights
+*.pt
+*.onnx
+
+# Output & uploads (generated at runtime)
+output/
+uploads/
+
+# macOS
+.DS_Store
+
+# Brainstorm / superpowers cache
+.superpowers/
+
+# IDE
+.vscode/
+.idea/

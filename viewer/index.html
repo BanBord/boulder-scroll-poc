@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Boulder Scroll</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0c0c0c;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      height: 100dvh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* ── Controls panel ── */
+    #controls {
+      width: 220px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .ctrl-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: #59ff7a;
+    }
+
+    /* Drop zone */
+    #dropzone {
+      border: 1.5px dashed #2a2a2a;
+      border-radius: 10px;
+      padding: 16px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+    #dropzone:hover, #dropzone.drag-over { border-color: #59ff7a; }
+    #dropzone-icon { font-size: 24px; margin-bottom: 6px; }
+    #dropzone-label { font-size: 12px; color: #59ff7a; }
+    #dropzone-sub   { font-size: 10px; color: #444; margin-top: 3px; }
+    #file-input { display: none; }
+
+    /* Sliders */
+    .param-row { display: flex; flex-direction: column; gap: 6px; }
+    .param-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+    .param-name  { font-size: 11px; color: #555; letter-spacing: 0.08em; text-transform: uppercase; }
+    .param-value { font-size: 13px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; }
+    .param-hint  { font-size: 10px; color: #333; }
+    input[type=range] {
+      width: 100%;
+      appearance: none;
+      height: 3px;
+      background: #2a2a2a;
+      border-radius: 2px;
+      cursor: pointer;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      appearance: none;
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: #59ff7a;
+      border: 2px solid #0c0c0c;
+      box-shadow: 0 0 6px rgba(89,255,122,0.4);
+    }
+    input[type=range]::-moz-range-thumb {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: #59ff7a;
+      border: 2px solid #0c0c0c;
+    }
+
+    /* Render button */
+    #render-btn {
+      background: #59ff7a;
+      color: #000;
+      font-weight: 700;
+      font-size: 13px;
+      border: none;
+      border-radius: 8px;
+      padding: 11px;
+      cursor: pointer;
+      width: 100%;
+      transition: opacity 0.2s;
+    }
+    #render-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    /* Progress */
+    #progress-wrap { display: none; flex-direction: column; gap: 6px; }
+    #progress-wrap.visible { display: flex; }
+    #progress-track {
+      background: #1a1a1a;
+      border-radius: 3px;
+      height: 4px;
+      overflow: hidden;
+    }
+    #progress-fill {
+      height: 100%;
+      background: #59ff7a;
+      border-radius: 3px;
+      width: 0%;
+      transition: width 0.4s;
+    }
+    #progress-label { font-size: 11px; color: #555; }
+
+    /* ── Video stage ── */
+    #stage {
+      position: relative;
+      height: 90dvh;
+      aspect-ratio: 9 / 16;
+      background: #000;
+      border-radius: 12px;
+      overflow: hidden;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    #empty-state {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 8px;
+      color: #222;
+      pointer-events: none;
+    }
+    #empty-state svg { width: 40px; height: 40px; }
+    #empty-state p   { font-size: 12px; }
+
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    #play-icon {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 0.2s;
+      pointer-events: none;
+    }
+    #play-icon svg { width: 64px; height: 64px; fill: rgba(255,255,255,0.85); filter: drop-shadow(0 2px 8px rgba(0,0,0,0.6)); }
+    #stage:active #play-icon, #play-icon.flash { opacity: 1; }
+
+    #progress-bar {
+      position: absolute;
+      bottom: 0; left: 0;
+      height: 3px;
+      background: #59ff7a;
+      width: 0%;
+      transition: width 0.1s linear;
+      border-radius: 0 2px 2px 0;
+    }
+
+    /* ── Scrubber ── */
+    #slider-panel {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      height: 90dvh;
+    }
+    .slider-label { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: #555; }
+    #scrubber-wrap { flex: 1; display: flex; align-items: center; justify-content: center; width: 40px; }
+
+    input[type=range]#scrubber {
+      appearance: none;
+      -webkit-appearance: none;
+      writing-mode: vertical-lr;
+      direction: rtl;
+      width: 40px;
+      height: 100%;
+      background: transparent;
+      cursor: ns-resize;
+    }
+    input[type=range]#scrubber::-webkit-slider-runnable-track { width: 4px; background: #2a2a2a; border-radius: 2px; }
+    input[type=range]#scrubber::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      background: #59ff7a;
+      border: 2px solid #0c0c0c;
+      box-shadow: 0 0 8px rgba(89,255,122,0.5);
+      margin-left: -8px;
+    }
+    input[type=range]#scrubber::-moz-range-track { width: 4px; background: #2a2a2a; border-radius: 2px; }
+    input[type=range]#scrubber::-moz-range-thumb {
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      background: #59ff7a;
+      border: 2px solid #0c0c0c;
+      box-shadow: 0 0 8px rgba(89,255,122,0.5);
+    }
+
+    #timestamp { font-size: 11px; font-variant-numeric: tabular-nums; color: #555; letter-spacing: 0.05em; }
+  </style>
+</head>
+<body>
+
+  <!-- Controls -->
+  <div id="controls">
+    <span class="ctrl-title">Boulder Scroll</span>
+
+    <!-- Drop zone -->
+    <div id="dropzone" onclick="document.getElementById('file-input').click()">
+      <div id="dropzone-icon">⬆</div>
+      <div id="dropzone-label">Video laden</div>
+      <div id="dropzone-sub">MP4 oder MOV · klicken oder ablegen</div>
+    </div>
+    <input type="file" id="file-input" accept="video/*">
+
+    <!-- Zoom -->
+    <div class="param-row">
+      <div class="param-header">
+        <span class="param-name">Zoom</span>
+        <span class="param-value" id="fill-val">65%</span>
+      </div>
+      <span class="param-hint">Person füllt X% der Framehöhe</span>
+      <input type="range" id="fill-slider" min="40" max="85" value="65" step="1">
+    </div>
+
+    <!-- Smoothing -->
+    <div class="param-row">
+      <div class="param-header">
+        <span class="param-name">Kamera-Smoothing</span>
+        <span class="param-value" id="alpha-val">0.10</span>
+      </div>
+      <span class="param-hint">Träge ←→ Reaktiv</span>
+      <input type="range" id="alpha-slider" min="5" max="40" value="10" step="1">
+    </div>
+
+    <!-- Skeleton toggle -->
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:#555">
+      <input type="checkbox" id="skeleton-toggle" style="accent-color:#59ff7a;width:14px;height:14px">
+      Skelett + CoM einblenden
+    </label>
+
+    <!-- Render button -->
+    <button id="render-btn" disabled>Video auswählen</button>
+
+    <!-- Progress -->
+    <div id="progress-wrap">
+      <div id="progress-track"><div id="progress-fill"></div></div>
+      <span id="progress-label">Kalibriere…</span>
+    </div>
+  </div>
+
+  <!-- Video -->
+  <div id="stage">
+    <div id="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="2" y="4" width="20" height="16" rx="2"/>
+        <path d="M10 9l5 3-5 3V9z"/>
+      </svg>
+      <p>Noch kein Video gerendert</p>
+    </div>
+    <video id="vid" preload="auto" playsinline style="display:none"></video>
+    <div id="play-icon">
+      <svg id="icon-svg" viewBox="0 0 24 24"><path id="icon-path" d="M8 5v14l11-7z"/></svg>
+    </div>
+    <div id="progress-bar"></div>
+  </div>
+
+  <!-- Scrubber -->
+  <div id="slider-panel">
+    <span class="slider-label">Top</span>
+    <div id="scrubber-wrap">
+      <input type="range" id="scrubber" min="0" max="1000" value="0" step="1" disabled>
+    </div>
+    <span class="slider-label">Start</span>
+    <span id="timestamp">—</span>
+  </div>
+
+  <script>
+    // ── State ──────────────────────────────────────────
+    let selectedFile = null;
+    let currentJobId = null;
+    let pollTimer    = null;
+    let metaReady    = false;
+    let isScrubbing  = false;
+
+    // ── Elements ───────────────────────────────────────
+    const vid         = document.getElementById('vid');
+    const scrubber    = document.getElementById('scrubber');
+    const bar         = document.getElementById('progress-bar');
+    const ts          = document.getElementById('timestamp');
+    const stage       = document.getElementById('stage');
+    const icon        = document.getElementById('play-icon');
+    const iconPath    = document.getElementById('icon-path');
+    const emptyState  = document.getElementById('empty-state');
+    const renderBtn   = document.getElementById('render-btn');
+    const dropzone    = document.getElementById('dropzone');
+    const fileInput   = document.getElementById('file-input');
+    const fillSlider      = document.getElementById('fill-slider');
+    const alphaSlider     = document.getElementById('alpha-slider');
+    const skeletonToggle  = document.getElementById('skeleton-toggle');
+    const fillVal     = document.getElementById('fill-val');
+    const alphaVal    = document.getElementById('alpha-val');
+    const progWrap    = document.getElementById('progress-wrap');
+    const progFill    = document.getElementById('progress-fill');
+    const progLabel   = document.getElementById('progress-label');
+    const dropzoneLbl = document.getElementById('dropzone-label');
+
+    // ── Slider display ─────────────────────────────────
+    fillSlider.addEventListener('input', () => {
+      fillVal.textContent = fillSlider.value + '%';
+    });
+    alphaSlider.addEventListener('input', () => {
+      alphaVal.textContent = (alphaSlider.value / 100).toFixed(2);
+    });
+
+    // ── File selection ─────────────────────────────────
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files[0]) selectFile(fileInput.files[0]);
+    });
+
+    dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag-over'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
+    dropzone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropzone.classList.remove('drag-over');
+      if (e.dataTransfer.files[0]) selectFile(e.dataTransfer.files[0]);
+    });
+
+    function selectFile(file) {
+      selectedFile = file;
+      dropzoneLbl.textContent = file.name;
+      document.getElementById('dropzone-sub').textContent = formatBytes(file.size);
+      renderBtn.disabled = false;
+      renderBtn.textContent = '▶ Rendern';
+    }
+
+    function formatBytes(b) {
+      return b > 1e6 ? (b / 1e6).toFixed(1) + ' MB' : (b / 1e3).toFixed(0) + ' KB';
+    }
+
+    // ── Render ─────────────────────────────────────────
+    renderBtn.addEventListener('click', startRender);
+
+    async function startRender() {
+      if (!selectedFile) return;
+
+      renderBtn.disabled = true;
+      renderBtn.textContent = 'Rendert…';
+      progWrap.classList.add('visible');
+      progFill.style.width = '0%';
+      progLabel.textContent = 'Kalibriere…';
+
+      const form = new FormData();
+      form.append('video', selectedFile);
+      form.append('fill',     fillSlider.value / 100);
+      form.append('alpha',    alphaSlider.value / 100);
+      form.append('skeleton', skeletonToggle.checked);
+
+      const res  = await fetch('/render', { method: 'POST', body: form });
+      const data = await res.json();
+      currentJobId = data.job_id;
+
+      pollTimer = setInterval(pollStatus, 500);
+    }
+
+    async function pollStatus() {
+      if (!currentJobId) return;
+      const res  = await fetch('/status/' + currentJobId);
+      const job  = await res.json();
+
+      if (job.total > 0) {
+        const pct = Math.round((job.progress / job.total) * 100);
+        progFill.style.width = pct + '%';
+        progLabel.textContent = pct < 100
+          ? `${pct}% · ${job.progress} / ${job.total} Frames`
+          : 'Kodiere Video…';
+      }
+
+      if (job.status === 'done') {
+        clearInterval(pollTimer);
+        progLabel.textContent = 'Fertig ✓';
+        renderBtn.disabled = false;
+        renderBtn.textContent = '↺ Neu rendern';
+        loadVideo('/output/' + job.output);
+      } else if (job.status === 'error') {
+        clearInterval(pollTimer);
+        progLabel.textContent = 'Fehler: ' + (job.error || 'unbekannt');
+        renderBtn.disabled = false;
+        renderBtn.textContent = '↺ Nochmal';
+      }
+    }
+
+    // ── Video player ───────────────────────────────────
+    function loadVideo(src) {
+      metaReady = false;
+      vid.src = src;
+      vid.style.display = 'block';
+      emptyState.style.display = 'none';
+      vid.load();
+    }
+
+    vid.addEventListener('loadedmetadata', () => {
+      metaReady = true;
+      scrubber.disabled = false;
+      ts.textContent = fmt(0);
+    });
+
+    vid.addEventListener('error', () => {
+      console.error('Video error:', vid.error);
+      progLabel.textContent = 'Video konnte nicht geladen werden';
+    });
+
+    vid.addEventListener('timeupdate', () => {
+      if (isScrubbing || !metaReady) return;
+      const p = vid.currentTime / vid.duration;
+      scrubber.value    = Math.round(p * 1000);
+      bar.style.width   = (p * 100) + '%';
+      ts.textContent    = fmt(vid.currentTime);
+    });
+
+    scrubber.addEventListener('mousedown',  () => { isScrubbing = true;  vid.pause(); });
+    scrubber.addEventListener('touchstart', () => { isScrubbing = true;  vid.pause(); }, { passive: true });
+    scrubber.addEventListener('mouseup',    () => { isScrubbing = false; });
+    scrubber.addEventListener('touchend',   () => { isScrubbing = false; });
+
+    scrubber.addEventListener('input', () => {
+      if (!metaReady || isNaN(vid.duration) || vid.duration === 0) return;
+      const t = (scrubber.value / 1000) * vid.duration;
+      vid.currentTime   = t;
+      bar.style.width   = (scrubber.value / 10) + '%';
+      ts.textContent    = fmt(t);
+    });
+
+    stage.addEventListener('click', () => {
+      if (vid.style.display === 'none') return;
+      if (vid.paused) { vid.play();  flashIcon(true); }
+      else            { vid.pause(); flashIcon(false); }
+    });
+
+    function flashIcon(playing) {
+      iconPath.setAttribute('d', playing
+        ? 'M6 19h4V5H6zm8-14v14h4V5z'
+        : 'M8 5v14l11-7z');
+      icon.classList.add('flash');
+      setTimeout(() => icon.classList.remove('flash'), 400);
+    }
+
+    function fmt(s) {
+      const m   = Math.floor(s / 60);
+      const sec = Math.floor(s % 60).toString().padStart(2, '0');
+      return `${m}:${sec}`;
+    }
+
+    document.addEventListener('keydown', e => {
+      if (!metaReady) return;
+      if (e.code === 'Space')     { e.preventDefault(); vid.paused ? vid.play() : vid.pause(); }
+      if (e.code === 'ArrowUp')   { e.preventDefault(); vid.currentTime = Math.max(0, vid.currentTime - 1); }
+      if (e.code === 'ArrowDown') { e.preventDefault(); vid.currentTime = Math.min(vid.duration, vid.currentTime + 1); }
+    });
+  </script>
+</body>
+</html>
