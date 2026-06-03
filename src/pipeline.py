@@ -10,6 +10,44 @@ from .overlay import draw_com, draw_skeleton
 TRAIL_LEN = 40   # frames of CoM history to show
 
 
+def _balance_targets(
+    keypoints,          # np.ndarray (17,2) output coords, or None
+    kp_conf,            # np.ndarray (17,), or None
+    com_out,            # (x,y) or None
+    out_w: int,
+    panel_half: int,
+    conf_thresh: float = 0.2,
+):
+    """
+    Compute panel-space x targets for arm, leg, CoM balls.
+    Returns (arm_target, leg_target, com_target) as floats.
+    Panel centre = out_w // 2.  Range roughly [panel_cx - panel_half, panel_cx + panel_half].
+    """
+    panel_cx = out_w // 2
+    fallback = float(panel_cx)
+
+    if keypoints is None or kp_conf is None or com_out is None:
+        return fallback, fallback, fallback
+
+    com_x = float(com_out[0])
+
+    arm_xs = [float(keypoints[i, 0]) for i in [9, 10]  if kp_conf[i] > conf_thresh]
+    leg_xs = [float(keypoints[i, 0]) for i in [15, 16] if kp_conf[i] > conf_thresh]
+
+    arm_x = float(np.mean(arm_xs)) if arm_xs else com_x
+    leg_x = float(np.mean(leg_xs)) if leg_xs else com_x
+
+    sh_ok = kp_conf[5] > conf_thresh and kp_conf[6] > conf_thresh
+    body_w = float(abs(keypoints[5, 0] - keypoints[6, 0]) * 2.8) if sh_ok else 160.0
+    body_w = max(body_w, 80.0)
+
+    arm_target = panel_cx + (arm_x - com_x) / body_w * panel_half
+    leg_target = panel_cx + (leg_x - com_x) / body_w * panel_half
+    com_target = panel_cx + (com_x - out_w / 2) / (out_w * 0.4) * panel_half * 0.3
+
+    return float(arm_target), float(leg_target), float(com_target)
+
+
 def run(
     input_path: str,
     output_path: str,
