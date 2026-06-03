@@ -117,3 +117,74 @@ def draw_skeleton(
 
     cv2.addWeighted(overlay, blend, frame, 1.0 - blend, 0, frame)
     return frame
+
+
+# ── Balance panel ───────────────────────────────────────────────────────────
+
+_PANEL_H    = 220
+_BEAM_INSET = 40     # px from frame edge to beam end
+_BALL_CLR   = (50, 200, 50)
+_BALL_EDGE  = (180, 255, 180)
+_BEAM_CLR   = (150, 255, 150)
+_LBL_CLR    = (200, 255, 200)
+
+
+def draw_balance_panel(
+    frame: np.ndarray,
+    positions: dict,        # from PhysicsState.get_positions()
+    blend: float = 0.55,
+) -> np.ndarray:
+    """
+    Draw balance panel in the bottom _PANEL_H pixels of frame.
+    Positions are x-coords in output-frame space; panel maps them to panel space.
+    """
+    out_h, out_w = frame.shape[:2]
+    panel_y  = out_h - _PANEL_H
+    panel_cx = out_w // 2
+    beam_half = out_w // 2 - _BEAM_INSET
+
+    beam_y1 = panel_y + 50    # arm beam y
+    beam_y2 = panel_y + 110   # leg beam y
+    com_y   = panel_y + 172   # CoM ball centre y
+
+    # Background
+    bg = frame.copy()
+    cv2.rectangle(bg, (0, panel_y), (out_w, out_h), (8, 8, 8), -1)
+    cv2.addWeighted(bg, blend, frame, 1.0 - blend, 0, frame)
+
+    # Beams
+    cv2.line(frame, (panel_cx - beam_half, beam_y1),
+             (panel_cx + beam_half, beam_y1), _BEAM_CLR, 3, cv2.LINE_AA)
+    cv2.line(frame, (panel_cx - beam_half, beam_y2),
+             (panel_cx + beam_half, beam_y2), _BEAM_CLR, 3, cv2.LINE_AA)
+
+    # Connector (CoM ball → leg beam)
+    com_xi = int(np.clip(positions["com"], panel_cx - beam_half, panel_cx + beam_half))
+    cv2.line(frame, (com_xi, beam_y2 + 28), (com_xi, com_y - 38),
+             (120, 200, 120), 2, cv2.LINE_AA)
+
+    # Arm ball
+    arm_xi = int(np.clip(positions["arm"], panel_cx - beam_half, panel_cx + beam_half))
+    cv2.circle(frame, (arm_xi, beam_y1), 20, _BALL_CLR,  -1, cv2.LINE_AA)
+    cv2.circle(frame, (arm_xi, beam_y1), 20, _BALL_EDGE,  2, cv2.LINE_AA)
+
+    # Leg ball
+    leg_xi = int(np.clip(positions["leg"], panel_cx - beam_half, panel_cx + beam_half))
+    cv2.circle(frame, (leg_xi, beam_y2), 26, _BALL_CLR,  -1, cv2.LINE_AA)
+    cv2.circle(frame, (leg_xi, beam_y2), 26, _BALL_EDGE,  2, cv2.LINE_AA)
+
+    # CoM ball (fulcrum)
+    cv2.circle(frame, (com_xi, com_y), 36, _BALL_CLR,  -1, cv2.LINE_AA)
+    cv2.circle(frame, (com_xi, com_y), 36, _BALL_EDGE,  2, cv2.LINE_AA)
+
+    # Labels
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    def _lbl(text, pt):
+        cv2.putText(frame, text, pt, font, 0.38, (0, 0, 0),    3, cv2.LINE_AA)
+        cv2.putText(frame, text, pt, font, 0.38, _LBL_CLR,      1, cv2.LINE_AA)
+
+    _lbl("Arm",  (arm_xi - 14, beam_y1 + 5))
+    _lbl("Bein", (leg_xi - 18, beam_y2 + 5))
+    _lbl("CoM",  (com_xi - 18, com_y   + 5))
+
+    return frame
