@@ -96,8 +96,8 @@ def run(
     # Balance panel state
     if show_balance:
         from .balance import PhysicsState
-        from .overlay import draw_balance_panel
-        panel_half = out_w // 2 - 40
+        from .overlay import draw_balance_panel, _BEAM_INSET
+        panel_half = out_w // 2 - _BEAM_INSET
         _balance_state = PhysicsState(panel_cx=out_w // 2, panel_half=panel_half)
         _prev_com_x: float = float(out_w // 2)
 
