@@ -32,8 +32,9 @@ def render():
     fill          = float(request.form.get("fill",     0.65))
     alpha         = float(request.form.get("alpha",    0.10))
     preview_secs  = float(request.form.get("preview",  0))
-    show_skeleton = request.form.get("skeleton", "false").lower() in ("true", "1", "on")
-    print(f"[render] fill={fill}  alpha={alpha}  skeleton={show_skeleton}  raw={request.form.get('skeleton')!r}")
+    show_skeleton = request.form.get("skeleton",     "false").lower() in ("true", "1", "on")
+    track_holds   = request.form.get("track_holds",  "false").lower() in ("true", "1", "on")
+    print(f"[render] fill={fill}  alpha={alpha}  skeleton={show_skeleton}  holds={track_holds}")
 
     job_id = uuid.uuid4().hex[:8]
     ext = os.path.splitext(video_file.filename)[1] or ".mp4"
@@ -46,14 +47,14 @@ def render():
 
     t = threading.Thread(
         target=_run,
-        args=(job_id, input_path, output_path, fill, alpha, preview_secs or None, show_skeleton),
+        args=(job_id, input_path, output_path, fill, alpha, preview_secs or None, show_skeleton, track_holds),
         daemon=True,
     )
     t.start()
     return jsonify({"job_id": job_id})
 
 
-def _run(job_id, input_path, output_path, fill, alpha, max_seconds, show_skeleton=False):
+def _run(job_id, input_path, output_path, fill, alpha, max_seconds, show_skeleton=False, track_holds=False):
     try:
         from src.pipeline import run as pipeline_run
 
@@ -70,6 +71,7 @@ def _run(job_id, input_path, output_path, fill, alpha, max_seconds, show_skeleto
             person_fill=fill,
             show_com=False,
             show_skeleton=show_skeleton,
+            track_holds=track_holds,
             progress_callback=on_progress,
             max_seconds=max_seconds,
         )
