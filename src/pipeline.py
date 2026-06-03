@@ -57,6 +57,7 @@ def run(
     person_fill: float = 0.65,
     show_com: bool = False,
     show_skeleton: bool = False,
+    show_balance: bool = False,
     progress_callback=None,
     max_seconds: float = None,
 ) -> None:
@@ -92,6 +93,14 @@ def run(
     fourcc = cv2.VideoWriter_fourcc(*"avc1")
     writer = cv2.VideoWriter(output_path, fourcc, fps, (out_w, out_h))
 
+    # Balance panel state
+    if show_balance:
+        from .balance import PhysicsState
+        from .overlay import draw_balance_panel
+        panel_half = out_w // 2 - 40
+        _balance_state = PhysicsState(panel_cx=out_w // 2, panel_half=panel_half)
+        _prev_com_x: float = float(out_w // 2)
+
     smooth_cx  = float(src_w / 2)
     smooth_cy  = fixed_cy
     com_trail  = deque(maxlen=TRAIL_LEN)   # CoM positions in output coords
@@ -111,8 +120,7 @@ def run(
         if not ok:
             break
 
-        if show_skeleton:
-            # Single YOLO call — get hip, keypoints, CoM all at once
+        if show_skeleton or show_balance:
             hip, keypoints, kp_conf, com_src = detector.detect_all(frame)
         else:
             hip = detector.detect_hip_center(frame)
@@ -157,6 +165,38 @@ def run(
 
         elif show_com:
             draw_com(cropped, out_w // 2, out_h // 2)
+
+        if show_balance:
+            # Compute com_out if not already set by show_skeleton
+            if not show_skeleton:
+                com_out = None
+                if com_src is not None:
+                    x1_b = smooth_cx - fixed_crop_w / 2
+                    y1_b = smooth_cy - fixed_crop_h / 2
+                    sx_b = out_w / fixed_crop_w
+                    sy_b = out_h / fixed_crop_h
+                    com_out = ((com_src[0] - x1_b) * sx_b, (com_src[1] - y1_b) * sy_b)
+
+            # Fallen detection: large CoM jump or low confidence
+            _is_fallen = False
+            if com_out is not None:
+                _is_fallen = abs(com_out[0] - _prev_com_x) > 40.0
+                _prev_com_x = com_out[0]
+            elif kp_conf is not None and kp_conf.max() < 0.15:
+                _is_fallen = True
+
+            kps_out_bal = None
+            if keypoints is not None:
+                kps_out_bal = transform_keypoints(
+                    keypoints, smooth_cx, smooth_cy,
+                    fixed_crop_w, fixed_crop_h, out_w, out_h,
+                )
+
+            arm_t, leg_t, com_t = _balance_targets(
+                kps_out_bal, kp_conf, com_out, out_w, panel_half
+            )
+            _balance_state.update(arm_t, leg_t, com_t, is_fallen=_is_fallen)
+            draw_balance_panel(cropped, _balance_state.get_positions())
 
         writer.write(cropped)
 
