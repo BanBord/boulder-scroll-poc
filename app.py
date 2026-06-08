@@ -39,8 +39,9 @@ def render():
 
     job_id = uuid.uuid4().hex[:8]
     ext = os.path.splitext(video_file.filename)[1] or ".mp4"
-    input_path  = os.path.join(UPLOAD_DIR, f"{job_id}_input{ext}")
-    output_path = os.path.join(OUTPUT_DIR,  f"{job_id}_output.mp4")
+    input_path    = os.path.join(UPLOAD_DIR, f"{job_id}_input{ext}")
+    output_path   = os.path.join(OUTPUT_DIR,  f"{job_id}_output.mp4")
+    balance_path  = os.path.join(OUTPUT_DIR,  f"{job_id}_balance.json")
     video_file.save(input_path)
 
     with _lock:
@@ -48,16 +49,17 @@ def render():
 
     t = threading.Thread(
         target=_run,
-        args=(job_id, input_path, output_path, fill, alpha,
-              preview_secs or None, show_skeleton, track_holds, show_balance),
+        args=(job_id, input_path, output_path, balance_path,
+              fill, alpha, preview_secs or None, show_skeleton, track_holds, show_balance),
         daemon=True,
     )
     t.start()
     return jsonify({"job_id": job_id})
 
 
-def _run(job_id, input_path, output_path, fill, alpha,
-         max_seconds, show_skeleton=False, track_holds=False, show_balance=False):
+def _run(job_id, input_path, output_path, balance_path,
+         fill, alpha, max_seconds,
+         show_skeleton=False, track_holds=False, show_balance=False):
     try:
         from src.pipeline import run as pipeline_run
 
@@ -76,15 +78,17 @@ def _run(job_id, input_path, output_path, fill, alpha,
             show_skeleton=show_skeleton,
             track_holds=track_holds,
             show_balance=show_balance,
+            balance_json_path=balance_path,
             progress_callback=on_progress,
             max_seconds=max_seconds,
         )
 
         with _lock:
             j = _jobs[job_id]
-            j["status"]   = "done"
-            j["progress"] = j["total"]
-            j["output"]   = os.path.basename(output_path)
+            j["status"]    = "done"
+            j["progress"]  = j["total"]
+            j["output"]    = os.path.basename(output_path)
+            j["balance"]   = os.path.basename(balance_path)
 
     except Exception as exc:
         with _lock:
@@ -97,6 +101,11 @@ def job_status(job_id):
     with _lock:
         job = dict(_jobs.get(job_id, {"status": "not_found"}))
     return jsonify(job)
+
+
+@app.route("/balance/<filename>")
+def serve_balance(filename):
+    return send_from_directory(OUTPUT_DIR, filename, mimetype="application/json")
 
 
 if __name__ == "__main__":

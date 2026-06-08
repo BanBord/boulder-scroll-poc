@@ -257,6 +257,12 @@
       Skelett + CoM einblenden
     </label>
 
+    <!-- Balance toggle -->
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:#555">
+      <input type="checkbox" id="balance-toggle" style="accent-color:#59ff7a;width:14px;height:14px" checked>
+      Balance-Turm einblenden
+    </label>
+
     <!-- Render button -->
     <button id="render-btn" disabled>Video auswählen</button>
 
@@ -277,6 +283,7 @@
       <p>Noch kein Video gerendert</p>
     </div>
     <video id="vid" preload="auto" playsinline style="display:none"></video>
+    <canvas id="balance-canvas" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;"></canvas>
     <div id="play-icon">
       <svg id="icon-svg" viewBox="0 0 24 24"><path id="icon-path" d="M8 5v14l11-7z"/></svg>
     </div>
@@ -302,45 +309,39 @@
     let isScrubbing  = false;
 
     // ── Elements ───────────────────────────────────────
-    const vid         = document.getElementById('vid');
-    const scrubber    = document.getElementById('scrubber');
-    const bar         = document.getElementById('progress-bar');
-    const ts          = document.getElementById('timestamp');
-    const stage       = document.getElementById('stage');
-    const icon        = document.getElementById('play-icon');
-    const iconPath    = document.getElementById('icon-path');
-    const emptyState  = document.getElementById('empty-state');
-    const renderBtn   = document.getElementById('render-btn');
-    const dropzone    = document.getElementById('dropzone');
-    const fileInput   = document.getElementById('file-input');
-    const fillSlider      = document.getElementById('fill-slider');
-    const alphaSlider     = document.getElementById('alpha-slider');
-    const skeletonToggle  = document.getElementById('skeleton-toggle');
-    const fillVal     = document.getElementById('fill-val');
-    const alphaVal    = document.getElementById('alpha-val');
-    const progWrap    = document.getElementById('progress-wrap');
-    const progFill    = document.getElementById('progress-fill');
-    const progLabel   = document.getElementById('progress-label');
-    const dropzoneLbl = document.getElementById('dropzone-label');
+    const vid            = document.getElementById('vid');
+    const balanceCanvas  = document.getElementById('balance-canvas');
+    const scrubber       = document.getElementById('scrubber');
+    const bar            = document.getElementById('progress-bar');
+    const ts             = document.getElementById('timestamp');
+    const stage          = document.getElementById('stage');
+    const icon           = document.getElementById('play-icon');
+    const iconPath       = document.getElementById('icon-path');
+    const emptyState     = document.getElementById('empty-state');
+    const renderBtn      = document.getElementById('render-btn');
+    const dropzone       = document.getElementById('dropzone');
+    const fileInput      = document.getElementById('file-input');
+    const fillSlider     = document.getElementById('fill-slider');
+    const alphaSlider    = document.getElementById('alpha-slider');
+    const skeletonToggle = document.getElementById('skeleton-toggle');
+    const balanceToggle  = document.getElementById('balance-toggle');
+    const fillVal        = document.getElementById('fill-val');
+    const alphaVal       = document.getElementById('alpha-val');
+    const progWrap       = document.getElementById('progress-wrap');
+    const progFill       = document.getElementById('progress-fill');
+    const progLabel      = document.getElementById('progress-label');
+    const dropzoneLbl    = document.getElementById('dropzone-label');
 
     // ── Slider display ─────────────────────────────────
-    fillSlider.addEventListener('input', () => {
-      fillVal.textContent = fillSlider.value + '%';
-    });
-    alphaSlider.addEventListener('input', () => {
-      alphaVal.textContent = (alphaSlider.value / 100).toFixed(2);
-    });
+    fillSlider.addEventListener('input', () => { fillVal.textContent = fillSlider.value + '%'; });
+    alphaSlider.addEventListener('input', () => { alphaVal.textContent = (alphaSlider.value / 100).toFixed(2); });
 
     // ── File selection ─────────────────────────────────
-    fileInput.addEventListener('change', () => {
-      if (fileInput.files[0]) selectFile(fileInput.files[0]);
-    });
-
+    fileInput.addEventListener('change', () => { if (fileInput.files[0]) selectFile(fileInput.files[0]); });
     dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag-over'); });
     dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
     dropzone.addEventListener('drop', e => {
-      e.preventDefault();
-      dropzone.classList.remove('drag-over');
+      e.preventDefault(); dropzone.classList.remove('drag-over');
       if (e.dataTransfer.files[0]) selectFile(e.dataTransfer.files[0]);
     });
 
@@ -351,17 +352,13 @@
       renderBtn.disabled = false;
       renderBtn.textContent = '▶ Rendern';
     }
-
-    function formatBytes(b) {
-      return b > 1e6 ? (b / 1e6).toFixed(1) + ' MB' : (b / 1e3).toFixed(0) + ' KB';
-    }
+    function formatBytes(b) { return b > 1e6 ? (b/1e6).toFixed(1)+' MB' : (b/1e3).toFixed(0)+' KB'; }
 
     // ── Render ─────────────────────────────────────────
     renderBtn.addEventListener('click', startRender);
 
     async function startRender() {
       if (!selectedFile) return;
-
       renderBtn.disabled = true;
       renderBtn.textContent = 'Rendert…';
       progWrap.classList.add('visible');
@@ -369,29 +366,28 @@
       progLabel.textContent = 'Kalibriere…';
 
       const form = new FormData();
-      form.append('video', selectedFile);
+      form.append('video',    selectedFile);
       form.append('fill',     fillSlider.value / 100);
       form.append('alpha',    alphaSlider.value / 100);
       form.append('skeleton', skeletonToggle.checked);
+      form.append('balance',  'true');   // always collect balance data
 
       const res  = await fetch('/render', { method: 'POST', body: form });
       const data = await res.json();
       currentJobId = data.job_id;
-
       pollTimer = setInterval(pollStatus, 500);
     }
 
     async function pollStatus() {
       if (!currentJobId) return;
-      const res  = await fetch('/status/' + currentJobId);
-      const job  = await res.json();
+      const res = await fetch('/status/' + currentJobId);
+      const job = await res.json();
 
       if (job.total > 0) {
         const pct = Math.round((job.progress / job.total) * 100);
         progFill.style.width = pct + '%';
         progLabel.textContent = pct < 100
-          ? `${pct}% · ${job.progress} / ${job.total} Frames`
-          : 'Kodiere Video…';
+          ? `${pct}% · ${job.progress} / ${job.total} Frames` : 'Kodiere Video…';
       }
 
       if (job.status === 'done') {
@@ -400,6 +396,7 @@
         renderBtn.disabled = false;
         renderBtn.textContent = '↺ Neu rendern';
         loadVideo('/output/' + job.output);
+        if (job.balance) loadBalanceData('/balance/' + job.balance);
       } else if (job.status === 'error') {
         clearInterval(pollTimer);
         progLabel.textContent = 'Fehler: ' + (job.error || 'unbekannt');
@@ -421,60 +418,247 @@
       metaReady = true;
       scrubber.disabled = false;
       ts.textContent = fmt(0);
+      resizeCanvas();
     });
-
-    vid.addEventListener('error', () => {
-      console.error('Video error:', vid.error);
-      progLabel.textContent = 'Video konnte nicht geladen werden';
-    });
+    vid.addEventListener('error', () => { progLabel.textContent = 'Video konnte nicht geladen werden'; });
 
     vid.addEventListener('timeupdate', () => {
       if (isScrubbing || !metaReady) return;
       const p = vid.currentTime / vid.duration;
-      scrubber.value    = Math.round(p * 1000);
-      bar.style.width   = (p * 100) + '%';
-      ts.textContent    = fmt(vid.currentTime);
+      scrubber.value  = Math.round(p * 1000);
+      bar.style.width = (p * 100) + '%';
+      ts.textContent  = fmt(vid.currentTime);
     });
 
     scrubber.addEventListener('mousedown',  () => { isScrubbing = true;  vid.pause(); });
     scrubber.addEventListener('touchstart', () => { isScrubbing = true;  vid.pause(); }, { passive: true });
     scrubber.addEventListener('mouseup',    () => { isScrubbing = false; });
     scrubber.addEventListener('touchend',   () => { isScrubbing = false; });
-
     scrubber.addEventListener('input', () => {
       if (!metaReady || isNaN(vid.duration) || vid.duration === 0) return;
       const t = (scrubber.value / 1000) * vid.duration;
-      vid.currentTime   = t;
-      bar.style.width   = (scrubber.value / 10) + '%';
-      ts.textContent    = fmt(t);
+      vid.currentTime = t;
+      bar.style.width = (scrubber.value / 10) + '%';
+      ts.textContent  = fmt(t);
     });
 
     stage.addEventListener('click', () => {
       if (vid.style.display === 'none') return;
-      if (vid.paused) { vid.play();  flashIcon(true); }
+      if (vid.paused) { vid.play(); flashIcon(true); }
       else            { vid.pause(); flashIcon(false); }
     });
 
     function flashIcon(playing) {
-      iconPath.setAttribute('d', playing
-        ? 'M6 19h4V5H6zm8-14v14h4V5z'
-        : 'M8 5v14l11-7z');
+      iconPath.setAttribute('d', playing ? 'M6 19h4V5H6zm8-14v14h4V5z' : 'M8 5v14l11-7z');
       icon.classList.add('flash');
       setTimeout(() => icon.classList.remove('flash'), 400);
     }
-
     function fmt(s) {
-      const m   = Math.floor(s / 60);
-      const sec = Math.floor(s % 60).toString().padStart(2, '0');
-      return `${m}:${sec}`;
+      return `${Math.floor(s/60)}:${Math.floor(s%60).toString().padStart(2,'0')}`;
     }
-
     document.addEventListener('keydown', e => {
       if (!metaReady) return;
       if (e.code === 'Space')     { e.preventDefault(); vid.paused ? vid.play() : vid.pause(); }
       if (e.code === 'ArrowUp')   { e.preventDefault(); vid.currentTime = Math.max(0, vid.currentTime - 1); }
       if (e.code === 'ArrowDown') { e.preventDefault(); vid.currentTime = Math.min(vid.duration, vid.currentTime + 1); }
     });
+
+    balanceToggle.addEventListener('change', () => {
+      balanceCanvas.style.opacity = balanceToggle.checked ? '1' : '0';
+    });
+
+    // ── Canvas resize ──────────────────────────────────
+    function resizeCanvas() {
+      balanceCanvas.width  = stage.clientWidth;
+      balanceCanvas.height = stage.clientHeight;
+    }
+    resizeCanvas();
+    new ResizeObserver(resizeCanvas).observe(stage);
+
+    // ── Balance data ───────────────────────────────────
+    let balanceData = null;   // { fps, frames: [{f, arm, leg, com}] }
+
+    async function loadBalanceData(url) {
+      try {
+        const res = await fetch(url);
+        balanceData = await res.json();
+        console.log('[balance] loaded', balanceData.frames.length, 'frames');
+      } catch(e) { console.warn('[balance] load failed', e); }
+    }
+
+    // Binary search: find nearest frame entry for given frame index
+    function getBalanceAt(frameIdx) {
+      if (!balanceData || !balanceData.frames.length) return null;
+      const frames = balanceData.frames;
+      let lo = 0, hi = frames.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (frames[mid].f < frameIdx) lo = mid + 1; else hi = mid;
+      }
+      // also check neighbour
+      if (lo > 0 && Math.abs(frames[lo-1].f - frameIdx) < Math.abs(frames[lo].f - frameIdx)) lo--;
+      return frames[lo];
+    }
+
+    // ── Physics engine ─────────────────────────────────
+    // Each layer: ball rolls on beam, beam tilts from ball torque
+    function makeLayer(halfW, ballR) {
+      return { ballX:0, ballV:0, beamAngle:0, beamOmega:0, halfW, ballR };
+    }
+
+    const PHY = {
+      gravity:   0.055,
+      bFric:     0.982,
+      bDamp:     0.972,
+      torque:    0.007,
+      dataForce: 0.010,
+      maxAngle:  36 * Math.PI / 180,
+    };
+
+    function stepLayer(L, targetBallX) {
+      // Torque: ball weight tips beam
+      const tau = -L.ballX * Math.cos(L.beamAngle) * PHY.torque;
+      L.beamOmega += tau;
+      L.beamOmega *= PHY.bDamp;
+      L.beamAngle += L.beamOmega;
+      if (Math.abs(L.beamAngle) > PHY.maxAngle) {
+        L.beamAngle = Math.sign(L.beamAngle) * PHY.maxAngle;
+        L.beamOmega *= -0.15;
+      }
+      // Ball: gravity down slope + data nudge
+      const grav = -PHY.gravity * Math.sin(L.beamAngle);
+      const push = (targetBallX - L.ballX) * PHY.dataForce;
+      L.ballV += grav + push;
+      L.ballV *= PHY.bFric;
+      L.ballX += L.ballV;
+      const maxX = L.halfW - L.ballR - 4;
+      if (Math.abs(L.ballX) > maxX) {
+        L.ballX = Math.sign(L.ballX) * maxX;
+        L.ballV *= -0.2;
+      }
+    }
+
+    const armLayer = makeLayer(90, 14);
+    const legLayer = makeLayer(76, 18);
+    let comOff = 0, comV = 0;
+    let tArmTarget = 0, tLegTarget = 0, tComTarget = 0;
+
+    // ── Tower renderer ─────────────────────────────────
+    function ballGrad(ctx, bx, by, r) {
+      const g = ctx.createRadialGradient(bx - r*0.3, by - r*0.35, r*0.04, bx, by, r);
+      g.addColorStop(0,    '#edfff2');
+      g.addColorStop(0.45, '#59ff7a');
+      g.addColorStop(1,    '#0a1f0a');
+      return g;
+    }
+
+    function drawBall(ctx, bx, by, r, alpha) {
+      ctx.save(); ctx.globalAlpha = alpha;
+      ctx.beginPath(); ctx.arc(bx, by, r, 0, Math.PI*2);
+      ctx.fillStyle = ballGrad(ctx, bx, by, r); ctx.fill();
+      ctx.strokeStyle = 'rgba(180,255,190,0.5)'; ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawBeam(ctx, px, py, halfW, angle, alpha) {
+      ctx.save(); ctx.globalAlpha = alpha;
+      ctx.translate(px, py); ctx.rotate(angle);
+      // shadow
+      ctx.beginPath(); ctx.moveTo(-halfW, 3); ctx.lineTo(halfW, 3);
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.lineWidth = 7; ctx.lineCap = 'round'; ctx.stroke();
+      // beam
+      const lg = ctx.createLinearGradient(-halfW, 0, halfW, 0);
+      lg.addColorStop(0,   'rgba(89,255,122,0.05)');
+      lg.addColorStop(0.5, 'rgba(89,255,122,0.92)');
+      lg.addColorStop(1,   'rgba(89,255,122,0.05)');
+      ctx.beginPath(); ctx.moveTo(-halfW,0); ctx.lineTo(halfW,0);
+      ctx.strokeStyle = lg; ctx.lineWidth = 3.5; ctx.stroke();
+      // end dots
+      for (const ex of [-halfW, halfW]) {
+        ctx.beginPath(); ctx.arc(ex, 0, 4, 0, Math.PI*2);
+        ctx.fillStyle = 'rgba(89,255,122,0.28)'; ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    function drawLabel(ctx, text, x, y) {
+      ctx.font = '10px monospace'; ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(89,255,122,0.38)';
+      ctx.fillText(text, x, y);
+    }
+
+    function renderTower(ctx, W, H) {
+      ctx.clearRect(0, 0, W, H);
+      if (!balanceToggle.checked) return;
+
+      // Tower sits in bottom portion of canvas
+      const COM_R = Math.round(W * 0.10);
+      const towerCX = W / 2 + comOff * 0.25;
+      const comCY   = H - Math.round(H * 0.06) - COM_R;
+
+      // Beam1 pivot = top of CoM
+      const b1px = towerCX, b1py = comCY - COM_R;
+
+      // Arm ball world pos (on beam1 surface)
+      const a = armLayer;
+      const armWX = b1px + a.ballX * Math.cos(a.beamAngle);
+      const armWY = b1py + a.ballX * Math.sin(a.beamAngle) - a.ballR;
+
+      // Beam2 pivot = top of arm ball
+      const b2px = armWX, b2py = armWY - a.ballR;
+
+      // Leg ball world pos (on beam2 surface)
+      const l = legLayer;
+      const legWX = b2px + l.ballX * Math.cos(l.beamAngle);
+      const legWY = b2py + l.ballX * Math.sin(l.beamAngle) - l.ballR;
+
+      // Draw bottom → top
+      drawBall(ctx, towerCX, comCY, COM_R, 0.50);
+      drawLabel(ctx, 'CoM', towerCX, comCY + COM_R + 13);
+
+      drawBeam(ctx, b1px, b1py, a.halfW, a.beamAngle, 0.75);
+
+      drawBall(ctx, armWX, armWY, a.ballR, 0.85);
+      drawLabel(ctx, 'Arm', armWX, armWY + a.ballR + 13);
+
+      drawBeam(ctx, b2px, b2py, l.halfW, l.beamAngle, 0.92);
+
+      drawBall(ctx, legWX, legWY, l.ballR, 1.0);
+      drawLabel(ctx, 'Bein', legWX, legWY + l.ballR + 13);
+    }
+
+    // ── Animation loop ─────────────────────────────────
+    const bCtx = balanceCanvas.getContext('2d');
+
+    function physicsLoop() {
+      // Get current frame index from video
+      if (balanceData && metaReady && !isNaN(vid.currentTime)) {
+        const fps      = balanceData.fps || 30;
+        const frameIdx = Math.round(vid.currentTime * fps);
+        const entry    = getBalanceAt(frameIdx);
+        if (entry) {
+          // arm = com_x - arm_midpoint  → typical range ±200px, map to ±halfW
+          tArmTarget = entry.arm * (armLayer.halfW / 200);
+          // leg = com_x - foot_midpoint → tighter range ±120px, more sensitive
+          tLegTarget = entry.leg * (legLayer.halfW / 120);
+          // com = absolute offset from frame centre → drives base wobble visibly
+          tComTarget = entry.com * 0.45;
+        }
+      }
+
+      // Step physics
+      comV = comV * 0.92 + (tComTarget - comOff) * 0.04;
+      comOff += comV;
+      stepLayer(armLayer, tArmTarget);
+      stepLayer(legLayer, tLegTarget);
+
+      // Render
+      const W = balanceCanvas.width, H = balanceCanvas.height;
+      renderTower(bCtx, W, H);
+
+      requestAnimationFrame(physicsLoop);
+    }
+    physicsLoop();
   </script>
 </body>
 </html>

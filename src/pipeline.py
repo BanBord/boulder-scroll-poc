@@ -1,4 +1,5 @@
 import cv2
+import json
 import numpy as np
 from collections import deque
 from tqdm import tqdm
@@ -10,42 +11,45 @@ from .overlay import draw_com, draw_skeleton
 TRAIL_LEN = 40   # frames of CoM history to show
 
 
-def _balance_targets(
+def _balance_data(
     keypoints,          # np.ndarray (17,2) output coords, or None
     kp_conf,            # np.ndarray (17,), or None
     com_out,            # (x,y) or None
     out_w: int,
-    panel_half: int,
     conf_thresh: float = 0.2,
 ):
     """
-    Compute panel-space x targets for arm, leg, CoM balls.
-    Returns (arm_target, leg_target, com_target) as floats.
-    Panel centre = out_w // 2.  Range roughly [panel_cx - panel_half, panel_cx + panel_half].
-    """
-    panel_cx = out_w // 2
-    fallback = float(panel_cx)
+    CoM-centred balance signals for the tower visualisation.
+    Returns dict {"arm": float, "leg": float, "com": float} or None.
 
+    arm = com_x − arm_midpoint   (wrists 9,10)     + → CoM right of hands
+    leg = com_x − foot_midpoint  (ankles 15,16 or knees 13,14 as fallback)
+                                                    + → CoM right of feet
+    com = com_x − out_w/2        absolute offset,  + → body right of frame centre
+    """
     if keypoints is None or kp_conf is None or com_out is None:
-        return fallback, fallback, fallback
+        return None
 
     com_x = float(com_out[0])
 
-    arm_xs = [float(keypoints[i, 0]) for i in [9, 10]  if kp_conf[i] > conf_thresh]
-    leg_xs = [float(keypoints[i, 0]) for i in [15, 16] if kp_conf[i] > conf_thresh]
+    def kp_x(idx):
+        return float(keypoints[idx, 0]) if kp_conf[idx] > conf_thresh else None
 
-    arm_x = float(np.mean(arm_xs)) if arm_xs else com_x
-    leg_x = float(np.mean(leg_xs)) if leg_xs else com_x
+    # Arm midpoint: wrists
+    arm_pts = [x for x in [kp_x(9), kp_x(10)] if x is not None]
+    arm_mid  = float(np.mean(arm_pts)) if arm_pts else None
 
-    sh_ok = kp_conf[5] > conf_thresh and kp_conf[6] > conf_thresh
-    body_w = float(abs(keypoints[5, 0] - keypoints[6, 0]) * 2.8) if sh_ok else 160.0
-    body_w = max(body_w, 80.0)
+    # Foot midpoint: ankles first, knees as fallback
+    foot_pts = [x for x in [kp_x(15), kp_x(16)] if x is not None]
+    if not foot_pts:
+        foot_pts = [x for x in [kp_x(13), kp_x(14)] if x is not None]
+    foot_mid = float(np.mean(foot_pts)) if foot_pts else None
 
-    arm_target = panel_cx + (arm_x - com_x) / body_w * panel_half
-    leg_target = panel_cx + (leg_x - com_x) / body_w * panel_half
-    com_target = panel_cx + (com_x - out_w / 2) / (out_w * 0.4) * panel_half * 0.3
+    arm_sig  = round(com_x - arm_mid,        2) if arm_mid  is not None else 0.0
+    leg_sig  = round(com_x - foot_mid,       2) if foot_mid is not None else 0.0
+    com_off  = round(com_x - out_w / 2,      2)
 
-    return float(arm_target), float(leg_target), float(com_target)
+    return {"arm": arm_sig, "leg": leg_sig, "com": com_off}
 
 
 def run(
@@ -58,6 +62,8 @@ def run(
     show_com: bool = False,
     show_skeleton: bool = False,
     show_balance: bool = False,
+    balance_json_path: str = None,
+    track_holds: bool = False,
     progress_callback=None,
     max_seconds: float = None,
 ) -> None:
@@ -93,13 +99,8 @@ def run(
     fourcc = cv2.VideoWriter_fourcc(*"avc1")
     writer = cv2.VideoWriter(output_path, fourcc, fps, (out_w, out_h))
 
-    # Balance panel state
-    if show_balance:
-        from .balance import PhysicsState
-        from .overlay import draw_balance_panel, _BEAM_INSET
-        panel_half = out_w // 2 - _BEAM_INSET
-        _balance_state = PhysicsState(panel_cx=out_w // 2, panel_half=panel_half)
-        _prev_com_x: float = float(out_w // 2)
+    # Balance JSON accumulation
+    _balance_frames = [] if (show_balance or balance_json_path) else None
 
     smooth_cx  = float(src_w / 2)
     smooth_cy  = fixed_cy
@@ -166,8 +167,8 @@ def run(
         elif show_com:
             draw_com(cropped, out_w // 2, out_h // 2)
 
-        if show_balance:
-            # Compute com_out if not already set by show_skeleton
+        if _balance_frames is not None:
+            # Ensure com_out is available even when show_skeleton is False
             if not show_skeleton:
                 com_out = None
                 if com_src is not None:
@@ -177,14 +178,6 @@ def run(
                     sy_b = out_h / fixed_crop_h
                     com_out = ((com_src[0] - x1_b) * sx_b, (com_src[1] - y1_b) * sy_b)
 
-            # Fallen detection: large CoM jump or low confidence
-            _is_fallen = False
-            if com_out is not None:
-                _is_fallen = abs(com_out[0] - _prev_com_x) > 40.0
-                _prev_com_x = com_out[0]
-            elif kp_conf is not None and kp_conf.max() < 0.15:
-                _is_fallen = True
-
             kps_out_bal = None
             if keypoints is not None:
                 kps_out_bal = transform_keypoints(
@@ -192,14 +185,20 @@ def run(
                     fixed_crop_w, fixed_crop_h, out_w, out_h,
                 )
 
-            arm_t, leg_t, com_t = _balance_targets(
-                kps_out_bal, kp_conf, com_out, out_w, panel_half
-            )
-            _balance_state.update(arm_t, leg_t, com_t, is_fallen=_is_fallen)
-            draw_balance_panel(cropped, _balance_state.get_positions())
+            bd = _balance_data(kps_out_bal, kp_conf, com_out, out_w)
+            if bd is not None:
+                bd["f"] = frame_idx
+                _balance_frames.append(bd)
 
         writer.write(cropped)
 
     cap.release()
     writer.release()
     print(f"Saved → {output_path}")
+
+    # Write balance JSON sidecar
+    if _balance_frames is not None:
+        out_json = balance_json_path or (output_path.rsplit(".", 1)[0] + "_balance.json")
+        with open(out_json, "w") as f:
+            json.dump({"fps": fps, "frames": _balance_frames}, f, separators=(",", ":"))
+        print(f"Balance JSON → {out_json}")
