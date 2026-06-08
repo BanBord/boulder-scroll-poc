@@ -65,6 +65,7 @@ def run(
     show_balance: bool = False,
     balance_json_path: str = None,
     track_holds: bool = False,
+    route_json_path: str = None,
     progress_callback=None,
     max_seconds: float = None,
 ) -> None:
@@ -79,17 +80,25 @@ def run(
 
     detector = Detector()
 
-    # --- Hold detection (optional, runs once on reference frame) ---
-    holds = []
+    # --- Hold detection (optional) ---
+    holds = []        # SAM-mask holds (legacy path)
+    route_holds = []  # pre-saved distance-based holds
     if track_holds:
-        from .hold_detector import detect_holds
-        from .contact import check_contacts
-        # Use first clean frame (t=1s) as reference — wall without climber
-        cap.set(cv2.CAP_PROP_POS_FRAMES, int(fps))
-        _, ref_frame = cap.read()
-        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-        if ref_frame is not None:
-            holds = detect_holds(ref_frame)
+        if route_json_path:
+            # Fast path: load pre-saved route holds, no SAM needed
+            from .contact import check_contacts_distance
+            with open(route_json_path) as f:
+                _route = json.load(f)
+            route_holds = _route["holds"]
+            print(f"Loaded {len(route_holds)} route holds from {route_json_path}")
+        else:
+            from .hold_detector import detect_holds
+            from .contact import check_contacts
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(fps))
+            _, ref_frame = cap.read()
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            if ref_frame is not None:
+                holds = detect_holds(ref_frame)
         timeline_frames = []
 
     # --- Calibration pass ---
@@ -141,8 +150,13 @@ def run(
             hip = detector.detect_hip_center(frame)
             keypoints = kp_conf = com_src = None
 
-        if track_holds and holds:
-            contacts = check_contacts(keypoints, kp_conf, holds)
+        if track_holds:
+            if route_holds:
+                contacts = check_contacts_distance(keypoints, kp_conf, route_holds)
+            elif holds:
+                contacts = check_contacts(keypoints, kp_conf, holds)
+            else:
+                contacts = {"LH": None, "RH": None, "LF": None, "RF": None}
             timeline_frames.append({
                 "frame": frame_idx,
                 "t":     round(frame_idx / fps, 3),
@@ -210,6 +224,9 @@ def run(
             bd = _balance_data(kps_out_bal, kp_conf, com_out, out_w)
             if bd is not None:
                 bd["f"] = frame_idx
+                if com_src is not None:
+                    bd["sx"] = round(float(com_src[0]), 1)
+                    bd["sy"] = round(float(com_src[1]), 1)
                 _balance_frames.append(bd)
 
         writer.write(cropped)

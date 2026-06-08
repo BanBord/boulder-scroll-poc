@@ -41,3 +41,27 @@ def check_contacts(
                 break
 
     return result
+
+
+def check_contacts_distance(
+    keypoints: Optional[np.ndarray],  # (17, 2) source-frame coords
+    kp_conf: Optional[np.ndarray],    # (17,)
+    route_holds: List[Dict],          # [{id, x, y, r}, ...] pre-saved holds
+) -> Dict[str, Optional[int]]:
+    """Distance-based contact for pre-saved route holds (no SAM masks needed)."""
+    result: Dict[str, Optional[int]] = {limb: None for limb in LIMBS}
+    if keypoints is None or kp_conf is None or not route_holds:
+        return result
+
+    for limb, kp_idx in LIMBS.items():
+        if kp_conf[kp_idx] < _CONF_THRESH:
+            continue
+        kx = float(keypoints[kp_idx, 0])
+        ky = float(keypoints[kp_idx, 1])
+        for hold in route_holds:
+            dist = ((kx - hold["x"]) ** 2 + (ky - hold["y"]) ** 2) ** 0.5
+            if dist <= hold["r"]:
+                result[limb] = hold["id"]
+                break
+
+    return result
