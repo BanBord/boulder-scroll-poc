@@ -32,10 +32,10 @@ def render():
     fill          = float(request.form.get("fill",     0.65))
     alpha         = float(request.form.get("alpha",    0.10))
     preview_secs  = float(request.form.get("preview",  0))
-    show_skeleton = request.form.get("skeleton", "false").lower() in ("true", "1", "on")
+    show_skeleton = request.form.get("skeleton",     "false").lower() in ("true", "1", "on")
     track_holds   = request.form.get("track_holds",  "false").lower() in ("true", "1", "on")
     show_balance  = request.form.get("balance",      "false").lower() in ("true", "1", "on")
-    print(f"[render] fill={fill}  alpha={alpha}  skeleton={show_skeleton}  raw={request.form.get('skeleton')!r}")
+    print(f"[render] fill={fill}  alpha={alpha}  skeleton={show_skeleton}  holds={track_holds}  balance={show_balance}")
 
     job_id = uuid.uuid4().hex[:8]
     ext = os.path.splitext(video_file.filename)[1] or ".mp4"

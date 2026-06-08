@@ -1,5 +1,6 @@
 import cv2
 import json
+import os
 import numpy as np
 from collections import deque
 from tqdm import tqdm
@@ -78,6 +79,19 @@ def run(
 
     detector = Detector()
 
+    # --- Hold detection (optional, runs once on reference frame) ---
+    holds = []
+    if track_holds:
+        from .hold_detector import detect_holds
+        from .contact import check_contacts
+        # Use first clean frame (t=1s) as reference — wall without climber
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(fps))
+        _, ref_frame = cap.read()
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        if ref_frame is not None:
+            holds = detect_holds(ref_frame)
+        timeline_frames = []
+
     # --- Calibration pass ---
     print("Calibrating focal length + anchor position from sample frames...")
     cal = detector.calibrate(cap, n_samples=60)
@@ -121,11 +135,19 @@ def run(
         if not ok:
             break
 
-        if show_skeleton or show_balance:
+        if show_skeleton or show_balance or track_holds:
             hip, keypoints, kp_conf, com_src = detector.detect_all(frame)
         else:
             hip = detector.detect_hip_center(frame)
             keypoints = kp_conf = com_src = None
+
+        if track_holds and holds:
+            contacts = check_contacts(keypoints, kp_conf, holds)
+            timeline_frames.append({
+                "frame": frame_idx,
+                "t":     round(frame_idx / fps, 3),
+                **{k: v for k, v in contacts.items()},
+            })
 
         if hip is not None:
             smooth_cx, smooth_cy = smooth_position(
@@ -202,3 +224,14 @@ def run(
         with open(out_json, "w") as f:
             json.dump({"fps": fps, "frames": _balance_frames}, f, separators=(",", ":"))
         print(f"Balance JSON → {out_json}")
+
+    if track_holds and holds:
+        timeline_path = os.path.splitext(output_path)[0] + "_timeline.json"
+        timeline = {
+            "fps": fps,
+            "holds": [{"id": h["id"], "center": list(h["center"]), "bbox": list(h["bbox"])} for h in holds],
+            "frames": timeline_frames,
+        }
+        with open(timeline_path, "w") as f:
+            json.dump(timeline, f)
+        print(f"Timeline → {timeline_path}")
