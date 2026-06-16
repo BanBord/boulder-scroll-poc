@@ -120,6 +120,57 @@ def serve_balance(filename):
     return send_from_directory(OUTPUT_DIR, filename, mimetype="application/json")
 
 
+@app.route("/compare/render", methods=["POST"])
+def compare_render():
+    p1_file = request.files.get("p1")
+    p2_file = request.files.get("p2")
+    if not p1_file or not p2_file:
+        return jsonify({"error": "p1 and p2 files are required"}), 400
+
+    job_id = uuid.uuid4().hex[:8]
+    ext1 = os.path.splitext(p1_file.filename)[1] or ".mp4"
+    ext2 = os.path.splitext(p2_file.filename)[1] or ".mp4"
+    p1_path = os.path.join(UPLOAD_DIR, f"{job_id}_p1{ext1}")
+    p2_path = os.path.join(UPLOAD_DIR, f"{job_id}_p2{ext2}")
+    p1_file.save(p1_path)
+    p2_file.save(p2_path)
+
+    with _lock:
+        _jobs[job_id] = {"status": "running"}
+
+    t = threading.Thread(
+        target=_run_compare,
+        args=(job_id, p1_path, p2_path),
+        daemon=True,
+    )
+    t.start()
+    return jsonify({"job_id": job_id})
+
+
+def _run_compare(job_id, p1_path, p2_path):
+    try:
+        from src.compare import run_comparison
+
+        run_comparison(
+            p1_path, p2_path,
+            route_json_path="routes/green_route.json",
+            out_path=os.path.join(OUTPUT_DIR, "comparison.json"),
+        )
+        with _lock:
+            _jobs[job_id]["status"] = "done"
+    except Exception as exc:
+        with _lock:
+            _jobs[job_id]["status"] = "error"
+            _jobs[job_id]["error"] = str(exc)
+
+
+@app.route("/compare/status/<job_id>")
+def compare_status(job_id):
+    with _lock:
+        job = dict(_jobs.get(job_id, {"status": "not_found"}))
+    return jsonify(job)
+
+
 if __name__ == "__main__":
     print("Boulder Scroll  →  http://localhost:5001")
     app.run(debug=False, threaded=True, port=5001)
