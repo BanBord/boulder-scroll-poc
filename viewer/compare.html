@@ -349,14 +349,10 @@ function buildTimeline() {
 
 function jumpToHold(holdId) {
   const ev1 = data.player1.hold_events.find(e => e.hold_id === holdId);
-  const ev2 = data.player2.hold_events.find(e => e.hold_id === holdId);
 
-  // Jump v1 to 1.5s before this hold (or start)
-  const t1 = ev1 ? Math.max(0, ev1.t - 1.5) : (p1s || 0);
-  v1.currentTime = t1;
-  v2.currentTime = Math.max(0, t1 - p1s + p2s);
-
-  pauseBoth();
+  // Jump to 1.5s before P1 reached this hold (or route start)
+  const absT1 = ev1 ? Math.max(0, ev1.t - 1.5) : p1s;
+  setRouteTime(absT1 - p1s);
 
   document.querySelectorAll('.hcol').forEach(c =>
     c.classList.toggle('active', parseInt(c.dataset.id) === holdId));
