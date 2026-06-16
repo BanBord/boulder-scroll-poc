@@ -11,6 +11,16 @@ html, body { height: 100%; background: #0a0a0a; color: #fff;
 
 #app { display: flex; flex-direction: column; height: 100dvh; }
 
+/* ── Video upload panel ────────────────────────────────── */
+#upload-panel {
+  flex-shrink: 0; padding: 8px 12px; background: #080808;
+  border-bottom: 1px solid #1a1a1a; display: flex; align-items: center; gap: 8px;
+}
+#upload-form { display: none; gap: 8px; align-items: center; flex-wrap: wrap; }
+#upload-panel.open #upload-form { display: flex; }
+#upload-form input[type="file"] { color: #ccc; font-size: 12px; max-width: 140px; }
+#upload-status { font-size: 12px; opacity: .7; }
+
 /* ── Composite canvas ───────────────────────────────────── */
 #stage {
   flex: 1; position: relative; background: #000; min-height: 0;
@@ -95,6 +105,17 @@ html, body { height: 100%; background: #0a0a0a; color: #fff;
 </head>
 <body>
 <div id="app">
+
+  <!-- Video upload panel -->
+  <div id="upload-panel">
+    <button class="ctrl-btn" id="upload-toggle">🔁 Andere Videos</button>
+    <form id="upload-form">
+      <input type="file" id="file-p1" accept="video/*" required>
+      <input type="file" id="file-p2" accept="video/*" required>
+      <button type="submit" class="ctrl-btn">Render</button>
+      <span id="upload-status"></span>
+    </form>
+  </div>
 
   <!-- Hidden videos -->
   <video id="v1" src="/output/p1_processed.mp4" preload="auto" playsinline muted style="display:none"></video>
@@ -377,28 +398,91 @@ document.getElementById('btn-start').addEventListener('click', () => {
   if (startRow) startRow.classList.add('active');
 });
 
+// ── Shared setup after comparison.json (re)loads ──────────
+function onComparisonLoaded(d) {
+  data = d;
+  p1s = d.player1.route_start_t ?? 0;
+  p2s = d.player2.route_start_t ?? 0;
+
+  buildRail();
+  buildStats();
+  resize();
+
+  // Jump both to start hold moment
+  setRouteTime(0);
+
+  // Highlight start hold
+  document.querySelectorAll('.rail-row').forEach(c => c.classList.remove('active'));
+  const startHold = d.route.holds.find(h => h.role === 'start');
+  if (startHold) {
+    const row = document.querySelector(`[data-id="${startHold.id}"]`);
+    if (row) row.classList.add('active');
+  }
+}
+
+// ── Video upload panel ──────────────────────────────────
+const uploadPanel  = document.getElementById('upload-panel');
+const uploadToggle = document.getElementById('upload-toggle');
+const uploadForm   = document.getElementById('upload-form');
+const uploadStatus = document.getElementById('upload-status');
+
+uploadToggle.addEventListener('click', () => {
+  uploadPanel.classList.toggle('open');
+});
+
+uploadForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const p1File = document.getElementById('file-p1').files[0];
+  const p2File = document.getElementById('file-p2').files[0];
+  if (!p1File || !p2File) return;
+
+  const formData = new FormData();
+  formData.append('p1', p1File);
+  formData.append('p2', p2File);
+
+  uploadStatus.textContent = 'Lade hoch...';
+  fetch('/compare/render', { method: 'POST', body: formData })
+    .then(r => r.json())
+    .then(({ job_id, error }) => {
+      if (error) { uploadStatus.textContent = `Fehler: ${error}`; return; }
+      uploadStatus.textContent = 'Verarbeite...';
+      pollRenderStatus(job_id);
+    })
+    .catch(err => { uploadStatus.textContent = `Fehler: ${err}`; });
+});
+
+function pollRenderStatus(jobId) {
+  fetch(`/compare/status/${jobId}`)
+    .then(r => r.json())
+    .then(job => {
+      if (job.status === 'running') {
+        setTimeout(() => pollRenderStatus(jobId), 2000);
+      } else if (job.status === 'done') {
+        uploadStatus.textContent = 'Fertig!';
+        reloadComparisonData();
+      } else {
+        uploadStatus.textContent = `Fehler: ${job.error || job.status}`;
+      }
+    });
+}
+
+function reloadComparisonData() {
+  const bust = Date.now();
+  fetch(`/output/comparison.json?t=${bust}`)
+    .then(r => r.json())
+    .then(d => {
+      v1.src = `/output/p1_processed.mp4?t=${bust}`;
+      v2.src = `/output/p2_processed.mp4?t=${bust}`;
+      onComparisonLoaded(d);
+      uploadPanel.classList.remove('open');
+    });
+}
+
 // ── Init ──────────────────────────────────────────────────
 fetch('/output/comparison.json')
   .then(r => r.json())
   .then(d => {
-    data = d;
-    p1s = d.player1.route_start_t ?? 0;
-    p2s = d.player2.route_start_t ?? 0;
-
-    buildRail();
-    buildStats();
-    resize();
-
-    // Jump both to start hold moment
-    setRouteTime(0);
-
-    // Highlight start hold
-    const startHold = d.route.holds.find(h => h.role === 'start');
-    if (startHold) {
-      const row = document.querySelector(`[data-id="${startHold.id}"]`);
-      if (row) row.classList.add('active');
-    }
-
+    onComparisonLoaded(d);
     loop();
   });
 </script>
