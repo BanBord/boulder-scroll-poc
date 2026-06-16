@@ -209,6 +209,7 @@ def run_comparison(p1_path: str, p2_path: str, route_json_path: str, out_path: s
         climb_com = [p for p in com_path if route_start is None or p["f"] >= round(route_start * fps)]
         path_len  = _com_path_length(climb_com)
         lat_jitter = _com_lateral_jitter(climb_com)
+        flow       = _com_geometric_entropy(climb_com)
 
         return {
             "label":          data["label"],
@@ -221,6 +222,7 @@ def run_comparison(p1_path: str, p2_path: str, route_json_path: str, out_path: s
             "route_duration": route_duration,
             "com_path_length": path_len,
             "com_lateral_jitter": lat_jitter,
+            "com_flow":        flow,
         }
 
     comparison = {
@@ -240,8 +242,8 @@ def run_comparison(p1_path: str, p2_path: str, route_json_path: str, out_path: s
     print(f"\nComparison JSON → {out_path}")
     print(f"  P1: start={p1['label']} route_start={comparison['player1']['route_start_t']}  dur={_fmt(comparison['player1'])}")
     print(f"  P2: start={p2['label']} route_start={comparison['player2']['route_start_t']}  dur={_fmt(comparison['player2'])}")
-    print(f"  P1 CoM length={comparison['player1']['com_path_length']}  jitter={comparison['player1']['com_lateral_jitter']}")
-    print(f"  P2 CoM length={comparison['player2']['com_path_length']}  jitter={comparison['player2']['com_lateral_jitter']}")
+    print(f"  P1 CoM length={comparison['player1']['com_path_length']}  jitter={comparison['player1']['com_lateral_jitter']}  flow={comparison['player1']['com_flow']}")
+    print(f"  P2 CoM length={comparison['player2']['com_path_length']}  jitter={comparison['player2']['com_lateral_jitter']}  flow={comparison['player2']['com_flow']}")
 
 
 if __name__ == "__main__":
