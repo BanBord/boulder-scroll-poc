@@ -82,13 +82,37 @@ function railEventToRt(e) {
 - `#route-progress`, `#rp-fill`
 - `#mode-btn`
 
+### 4. Video-Upload via Browser (`app.py` + `viewer/compare.html`)
+
+Bisher musste man neue Videos per Terminal (`python3 -m src.compare --p1 ... --p2 ...`) einspeisen. Das reicht technisch (Pipeline ist bereits generisch, keine hartkodierten Dateinamen außer den festen Output-Pfaden `output/p1_processed.mp4`/`output/p2_processed.mp4`/`output/comparison.json`, die der Viewer liest) — aber der Nutzer braucht einen Browser-Weg, um Videos für andere Kletterer auf derselben Route auszutauschen.
+
+**Wiederverwendetes Muster:** `app.py` hat mit `/render` (Zeile 41-69) bereits einen Upload→Background-Thread→Status-Polling-Flow für eine einzelne Pipeline-Verarbeitung. Der neue Endpunkt spiegelt das für zwei Videos.
+
+**Neuer Endpunkt `POST /compare/render`:**
+- Erwartet Multipart-Formular mit zwei Dateien (`p1`, `p2`)
+- Speichert sie unter `uploads/<job_id>_p1<ext>` / `uploads/<job_id>_p2<ext>`
+- Startet einen Background-Thread, der `run_comparison()` aus `src/compare.py` mit diesen Pfaden, `routes/green_route.json` und festem Output-Pfad `output/comparison.json` aufruft (überschreibt die bestehenden Output-Dateien — das ist gewollt, der Viewer liest immer von dort)
+- Job-Tracking im bereits vorhandenen `_jobs`-Dict/Lock-Pattern, Status nur `running` → `done` / `error` (kein granulares Frame-Progress über zwei sequenzielle Pipeline-Läufe hinweg — bewusst einfach gehalten)
+
+**Neuer Endpunkt `GET /compare/status/<job_id>`:** gibt `{"status": "running"|"done"|"error", "error"?: str}` zurück.
+
+**Frontend (`compare.html`):** Kleines Upload-Panel, standardmäßig eingeklappt, über einen Button (z.B. "🔁 Andere Videos") einblendbar. Enthält zwei `<input type="file">` (P1/P2) + "Render"-Button + Status-Text ("Verarbeite..."/"Fertig"/Fehlermeldung). Bei Submit: `FormData` an `/compare/render` POSTen, `job_id` erhalten, alle 2s `/compare/status/<job_id>` pollen. Bei `"done"`:
+- `output/comparison.json` neu fetchen
+- `v1.src`/`v2.src` mit Cache-Buster-Query-Param neu setzen (sonst zeigt der Browser ggf. das alte gecachte Video unter demselben Pfad)
+- Rail, Stats und `setRouteTime(0)` neu initialisieren (gleicher Code-Pfad wie beim ersten Laden)
+
 ## Nicht im Scope
 
 - Textueller Hinweis "● Vergleich mit P2" (wie im Designdokument beschrieben) — nicht angefragt, kann später ergänzt werden
 - Touch-Events (Smartphone) — Zielgerät bleibt Laptop/Maus (siehe vorherige Spec)
 - Gestrichelter Erstnutzungs-Hinweis-Pfeil ("☟ Zum Vergleich gedrückt halten") aus dem Designdokument — nicht angefragt
 - Lösung des Top-Hold-Erkennungsproblems (Routenzeit-Stat bleibt `—`) — separates, bereits dokumentiertes Problem
+- Granulares Frame-Fortschritts-Prozent beim Upload-Render (nur running/done/error) — reicht für PoC-Zwecke
+- Upload-Validierung über "ist es eine Videodatei" hinaus (Dauer-Limits, Auflösungs-Check etc.)
+- Eigene Pro-Video-Hold-Kalibrierung — weiterhin Annahme: fixierte Kamera für alle Testvideos
 
 ## Erfolgskriterium
 
 Tester öffnet `compare.html`: sieht nur P1 in voller Breite plus eine vertikale Rail rechts mit Hold-Punkten. Drag/Scroll auf dem Video bewegt die Route wie bisher. Hält man die Maustaste (auf Video oder Rail) gedrückt, erscheint P2 transparent darüber — ohne Farbfilter, ohne dass das Bild "verschmilzt" wirkt wie zuvor. Loslassen blendet P2 wieder aus.
+
+Zusätzlich: Über den Button "🔁 Andere Videos" kann der Tester zwei neue Videodateien hochladen; nach Abschluss der Verarbeitung zeigt derselbe Viewer automatisch die neuen Kletterer auf derselben Route, ohne Terminal-Zugriff.
