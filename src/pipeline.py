@@ -53,6 +53,30 @@ def _balance_data(
     return {"arm": arm_sig, "leg": leg_sig, "com": com_off}
 
 
+def estimate_mean_com_x(input_path: str, detector) -> float | None:
+    """
+    Run pose detection once over the whole video (no drawing/writing) to get
+    the mean horizontal CoM position in source pixels — used as the reference
+    'ideal line' x for the deviation overlay in the main render pass.
+    """
+    cap = cv2.VideoCapture(input_path)
+    if not cap.isOpened():
+        return None
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    xs = []
+    for _ in range(total):
+        ok, frame = cap.read()
+        if not ok:
+            break
+        _, _, _, com_src = detector.detect_all(frame)
+        if com_src is not None:
+            xs.append(com_src[0])
+    cap.release()
+    if not xs:
+        return None
+    return sum(xs) / len(xs)
+
+
 def run(
     input_path: str,
     output_path: str,
