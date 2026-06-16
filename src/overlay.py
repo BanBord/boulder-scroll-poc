@@ -236,8 +236,8 @@ def draw_balance_panel(
 
 
 # ── Deviation line (mean CoM-x reference) ───────────────────────────────────
-_IDEAL_LINE_CLR = (180, 180, 180)  # light grey, dashed reference line
-_DEVIATION_CLR  = (255, 255, 255)  # white connector
+_IDEAL_LINE_CLR = (255, 0, 255)  # bright magenta, dashed reference line
+_DEVIATION_CLR  = (0, 255, 255)  # bright yellow connector
 
 
 def draw_deviation(frame: np.ndarray, com_out, ideal_x: float) -> np.ndarray:
@@ -252,9 +252,9 @@ def draw_deviation(frame: np.ndarray, com_out, ideal_x: float) -> np.ndarray:
     y = 0
     while y < h:
         y2 = min(y + dash_len, h)
-        cv2.line(frame, (ix, y), (ix, y2), _IDEAL_LINE_CLR, 1, cv2.LINE_AA)
+        cv2.line(frame, (ix, y), (ix, y2), _IDEAL_LINE_CLR, 2, cv2.LINE_AA)
         y += dash_len + gap_len
 
     cx, cy = int(round(com_out[0])), int(round(com_out[1]))
-    cv2.line(frame, (cx, cy), (ix, cy), _DEVIATION_CLR, 1, cv2.LINE_AA)
+    cv2.line(frame, (cx, cy), (ix, cy), _DEVIATION_CLR, 2, cv2.LINE_AA)
     return frame
