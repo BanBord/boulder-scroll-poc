@@ -89,6 +89,19 @@ html, body { height: 100%; background: #0a0a0a; color: #fff;
 .rail-row.is-top   .rail-node { border-color: #ffe44a; color: #ffe44a; }
 .rail-row.is-start .rail-node { border-color: #66ff88; color: #66ff88; }
 
+/* ── CoM metrics bar ──────────────────────────────────── */
+#metrics {
+  flex-shrink: 0; display: flex; flex-direction: column; gap: 1px;
+  background: #111; border-top: 1px solid #1e1e1e;
+}
+.metric-row {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  padding: 8px 12px; background: #0d0d0d; align-items: center;
+}
+.metric-label { font-size: 11px; opacity: .5; text-transform: uppercase; letter-spacing: .05em; }
+.metric-p1, .metric-p2 { font-size: 14px; font-weight: 700; text-align: right; color: #888; }
+.metric-p1.better, .metric-p2.better { color: #66ff88; }
+
 /* ── Controls ───────────────────────────────────────────── */
 #controls {
   flex-shrink: 0; display: flex; gap: 8px; align-items: center;
@@ -133,6 +146,25 @@ html, body { height: 100%; background: #0a0a0a; color: #fff;
       </div>
     </div>
     <div id="rail"><div id="rail-fill"></div></div>
+  </div>
+
+  <!-- CoM metrics -->
+  <div id="metrics">
+    <div class="metric-row" data-metric="com_path_length">
+      <span class="metric-label">Pfadlänge</span>
+      <span class="metric-p1">—</span>
+      <span class="metric-p2">—</span>
+    </div>
+    <div class="metric-row" data-metric="com_lateral_jitter">
+      <span class="metric-label">Wackeln</span>
+      <span class="metric-p1">—</span>
+      <span class="metric-p2">—</span>
+    </div>
+    <div class="metric-row" data-metric="com_flow">
+      <span class="metric-label">Flow</span>
+      <span class="metric-p1">—</span>
+      <span class="metric-p2">—</span>
+    </div>
   </div>
 
   <!-- Controls -->
@@ -357,6 +389,34 @@ document.getElementById('btn-start').addEventListener('click', () => {
   if (startRow) startRow.classList.add('active');
 });
 
+// ── CoM metrics ───────────────────────────────────────────
+const METRICS = [
+  { key: 'com_path_length',    label: 'Pfadlänge' },
+  { key: 'com_lateral_jitter', label: 'Wackeln' },
+  { key: 'com_flow',           label: 'Flow' },
+];
+
+function buildMetrics() {
+  const p1 = data.player1, p2 = data.player2;
+  METRICS.forEach(({ key }) => {
+    const row = document.querySelector(`.metric-row[data-metric="${key}"]`);
+    const v1 = p1[key], v2 = p2[key];
+    const elP1 = row.querySelector('.metric-p1');
+    const elP2 = row.querySelector('.metric-p2');
+    if (v1 == null || v2 == null) {
+      elP1.textContent = '—';
+      elP2.textContent = '—';
+      elP1.className = 'metric-p1';
+      elP2.className = 'metric-p2';
+      return;
+    }
+    elP1.textContent = v1;
+    elP2.textContent = v2;
+    elP1.className = 'metric-p1' + (v1 <= v2 ? ' better' : '');
+    elP2.className = 'metric-p2' + (v2 <= v1 ? ' better' : '');
+  });
+}
+
 // ── Shared setup after comparison.json (re)loads ──────────
 function onComparisonLoaded(d) {
   data = d;
@@ -364,6 +424,7 @@ function onComparisonLoaded(d) {
   p2s = d.player2.route_start_t ?? 0;
 
   buildRail();
+  buildMetrics();
   resize();
 
   // Jump both to start hold moment
