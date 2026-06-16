@@ -286,6 +286,30 @@ stageEl.addEventListener('wheel', (e) => {
   setRouteTime(routeTime() + deltaSec);
 }, { passive: false });
 
+// ── Progress bar: click/drag for absolute jumps ──────────
+const progressEl = document.getElementById('route-progress');
+let progressDragging = false;
+
+function progressEventToRt(e) {
+  const rect = progressEl.getBoundingClientRect();
+  const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  return frac * maxRouteTime();
+}
+
+progressEl.addEventListener('mousedown', (e) => {
+  if (!data) return;
+  progressDragging = true;
+  setRouteTime(progressEventToRt(e));
+  e.preventDefault();
+});
+
+window.addEventListener('mousemove', (e) => {
+  if (!progressDragging) return;
+  setRouteTime(progressEventToRt(e));
+});
+
+window.addEventListener('mouseup', () => { progressDragging = false; });
+
 // ── Hold timeline ─────────────────────────────────────────
 function buildTimeline() {
   const track = document.getElementById('hold-track');
