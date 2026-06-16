@@ -153,6 +153,35 @@ def _com_lateral_jitter(com_path: list) -> float:
     return round(math.sqrt(variance), 1)
 
 
+def _com_geometric_entropy(com_path: list) -> float | None:
+    """
+    Geometric entropy of the CoM trail (Cordier et al.): GE = ln(2L / C),
+    L = path length, C = perimeter of the path's convex hull.
+    Lower = straighter / more fluid path. Returns None if degenerate
+    (fewer than 3 unique points in the hull, zero-perimeter hull, or
+    zero-length path).
+    """
+    points = [(p["x"], p["y"]) for p in com_path]
+    hull = _convex_hull(points)
+    if len(hull) < 3:
+        return None
+
+    perimeter = 0.0
+    for i in range(len(hull)):
+        x1, y1 = hull[i]
+        x2, y2 = hull[(i + 1) % len(hull)]
+        perimeter += math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+
+    if perimeter == 0:
+        return None
+
+    length = _com_path_length(com_path)
+    if length == 0:
+        return None
+
+    return round(math.log(2 * length / perimeter), 3)
+
+
 def run_comparison(p1_path: str, p2_path: str, route_json_path: str, out_path: str) -> None:
     with open(route_json_path) as f:
         route = json.load(f)
