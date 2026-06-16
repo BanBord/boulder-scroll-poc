@@ -177,18 +177,12 @@ function resize() {
 window.addEventListener('resize', resize);
 
 // ── Composite draw ────────────────────────────────────────
-const GHOST_ALPHA = 0.5; // P2 opacity while holding, no colour filter
-
+// While holding: full swap to P2 (same route position), no blend — a
+// transparent overlay was too hard to read.
 function drawFrame() {
   ctx.clearRect(0, 0, cvs.width, cvs.height);
   ctx.globalAlpha = 1.0;
-  ctx.drawImage(v1, 0, 0, cvs.width, cvs.height);
-
-  if (holding) {
-    ctx.globalAlpha = GHOST_ALPHA;
-    ctx.drawImage(v2, 0, 0, cvs.width, cvs.height);
-    ctx.globalAlpha = 1.0;
-  }
+  ctx.drawImage(holding ? v2 : v1, 0, 0, cvs.width, cvs.height);
 }
 
 // ── Route time & progress ────────────────────────────────
