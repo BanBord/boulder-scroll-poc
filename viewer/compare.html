@@ -279,6 +279,13 @@ window.addEventListener('mousemove', (e) => {
 
 window.addEventListener('mouseup', () => { dragging = false; });
 
+stageEl.addEventListener('wheel', (e) => {
+  if (!data) return;
+  e.preventDefault();
+  const deltaSec = -e.deltaY / (DRAG_PX_PER_SEC * 4); // finer than drag
+  setRouteTime(routeTime() + deltaSec);
+}, { passive: false });
+
 // ── Hold timeline ─────────────────────────────────────────
 function buildTimeline() {
   const track = document.getElementById('hold-track');
