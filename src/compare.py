@@ -60,6 +60,7 @@ def _run_player(video_path: str, route_json_path: str, label: str) -> dict:
         show_com=False,
         show_skeleton=True,
         show_balance=False,
+        show_deviation=True,
         balance_json_path=balance_path,
         track_holds=True,
         route_json_path=route_json_path,
