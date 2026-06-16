@@ -33,8 +33,8 @@ Die Datenpipeline (`src/compare.py`, `src/pipeline.py`, `routes/green_route.json
 ### Vorbereitender Schritt: Uncommitted-Diff sichern
 Im `two-climber`-Worktree liegen unkommittete Änderungen (robusterer `route_start_t` via Doppelhand-Streak, `com_path_length`, `com_lateral_jitter`, persistente `output/p1_processed.mp4`/`p2_processed.mp4` statt Temp-Dateien). Diese sind Grundlage für die Stats-Anzeige im Viewer und werden zuerst committed, bevor neue Änderungen draufgesetzt werden.
 
-### `src/compare.py` — `_run_player()`
-- `show_com=True` zusätzlich zu `show_skeleton=True` (war: `show_com=False`). Macht den CoM-Punkt im Output-Video explizit sichtbar. Die Zeichenfunktion existiert bereits in `src/overlay.py::draw_com()`.
+### `src/compare.py` — keine Änderung nötig
+Geprüft: `draw_skeleton()` (`src/overlay.py:99-159`) zeichnet den CoM-Punkt + Trail bereits mit, wenn `show_skeleton=True` (aktuelle Konfiguration in `_run_player()`). Der ursprünglich geplante `show_com=True`-Zusatz entfällt — er würde ohnehin nie greifen, da `pipeline.py:203` ein `elif show_com` ist (nur relevant wenn `show_skeleton=False`).
 
 ### `viewer/compare.html` — Scrub-Steuerung statt Play/Pause
 - **Play/Pause-Button entfällt.**
