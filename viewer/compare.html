@@ -246,7 +246,11 @@ function updateRouteTime() {
   // Fill the rail from the bottom (route start) up to the current position
   const maxDur = maxRouteTime();
   if (maxDur > 0) {
-    document.getElementById('rail-fill').style.height = Math.min(100, rt / maxDur * 100) + '%';
+    const pct = Math.min(100, rt / maxDur * 100);
+    document.getElementById('rail-fill').style.height = pct + '%';
+    // Reveal the deviation curves from the bottom up, in lockstep with rail-fill
+    document.getElementById('rail-clip-rect').setAttribute('y', 100 - pct);
+    document.getElementById('rail-clip-rect').setAttribute('height', pct);
   }
 }
 
