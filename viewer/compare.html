@@ -254,6 +254,31 @@ function loop() {
   requestAnimationFrame(loop);
 }
 
+// ── Mouse-drag scrubbing on the video ────────────────────
+// Drag up = move forward along the route (climbing up).
+const DRAG_PX_PER_SEC = 200; // 200px vertical drag ≈ 1s of route time
+const stageEl = document.getElementById('stage');
+let dragging = false;
+let dragStartY = 0;
+let dragStartRt = 0;
+
+stageEl.addEventListener('mousedown', (e) => {
+  if (!data) return;
+  dragging = true;
+  dragStartY = e.clientY;
+  dragStartRt = routeTime();
+  e.preventDefault();
+});
+
+window.addEventListener('mousemove', (e) => {
+  if (!dragging) return;
+  const deltaY = e.clientY - dragStartY;
+  const deltaSec = -deltaY / DRAG_PX_PER_SEC;
+  setRouteTime(dragStartRt + deltaSec);
+});
+
+window.addEventListener('mouseup', () => { dragging = false; });
+
 // ── Hold timeline ─────────────────────────────────────────
 function buildTimeline() {
   const track = document.getElementById('hold-track');
