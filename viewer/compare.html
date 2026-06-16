@@ -25,12 +25,6 @@ html, body { height: 100%; background: #0a0a0a; color: #fff;
   font-size: 15px; font-weight: 700; letter-spacing: .03em;
   pointer-events: none;
 }
-/* Mode toggle */
-#mode-btn {
-  position: absolute; top: 10px; right: 10px;
-  background: rgba(0,0,0,.6); border: 1px solid #444; color: #fff;
-  border-radius: 8px; padding: 5px 10px; font-size: 12px; cursor: pointer;
-}
 
 /* ── Winner banner ──────────────────────────────────────── */
 #winner {
@@ -116,7 +110,6 @@ html, body { height: 100%; background: #0a0a0a; color: #fff;
   <div id="stage">
     <canvas id="composite"></canvas>
     <div id="route-time">t +0.0s</div>
-    <button id="mode-btn">👁 Beide</button>
   </div>
 
   <!-- Stats -->
@@ -149,8 +142,6 @@ html, body { height: 100%; background: #0a0a0a; color: #fff;
 
 <script>
 const SRC_W = 540, SRC_H = 960;
-const MODES = ['Beide', 'P1', 'P2'];
-let modeIdx = 0;
 
 const v1 = document.getElementById('v1');
 const v2 = document.getElementById('v2');
@@ -159,6 +150,7 @@ const ctx = cvs.getContext('2d');
 
 let data = null;
 let p1s = 0, p2s = 0; // route_start_t offsets
+let holding = false;  // true while mouse is pressed on video or rail → show P2 ghost
 
 // ── Resize canvas to match stage ─────────────────────────
 function resize() {
@@ -176,26 +168,18 @@ function resize() {
 window.addEventListener('resize', resize);
 
 // ── Composite draw ────────────────────────────────────────
+const GHOST_ALPHA = 0.5; // P2 opacity while holding, no colour filter
+
 function drawFrame() {
   ctx.clearRect(0, 0, cvs.width, cvs.height);
-  const mode = MODES[modeIdx];
-
-  if (mode === 'Beide' || mode === 'P1') {
-    ctx.globalAlpha = 1.0;
-    ctx.drawImage(v1, 0, 0, cvs.width, cvs.height);
-  }
-  if (mode === 'Beide' || mode === 'P2') {
-    ctx.globalAlpha = mode === 'Beide' ? 0.55 : 1.0;
-    // Warm tint for P2
-    ctx.drawImage(v2, 0, 0, cvs.width, cvs.height);
-    if (mode === 'Beide') {
-      ctx.globalCompositeOperation = 'multiply';
-      ctx.fillStyle = 'rgba(255,190,100,0.18)';
-      ctx.fillRect(0, 0, cvs.width, cvs.height);
-      ctx.globalCompositeOperation = 'source-over';
-    }
-  }
   ctx.globalAlpha = 1.0;
+  ctx.drawImage(v1, 0, 0, cvs.width, cvs.height);
+
+  if (holding) {
+    ctx.globalAlpha = GHOST_ALPHA;
+    ctx.drawImage(v2, 0, 0, cvs.width, cvs.height);
+    ctx.globalAlpha = 1.0;
+  }
 }
 
 // ── Route time & progress ────────────────────────────────
@@ -265,6 +249,7 @@ let dragStartRt = 0;
 stageEl.addEventListener('mousedown', (e) => {
   if (!data) return;
   dragging = true;
+  holding = true;
   dragStartY = e.clientY;
   dragStartRt = routeTime();
   e.preventDefault();
@@ -277,7 +262,7 @@ window.addEventListener('mousemove', (e) => {
   setRouteTime(dragStartRt + deltaSec);
 });
 
-window.addEventListener('mouseup', () => { dragging = false; });
+window.addEventListener('mouseup', () => { dragging = false; holding = false; });
 
 stageEl.addEventListener('wheel', (e) => {
   if (!data) return;
@@ -398,11 +383,6 @@ document.getElementById('btn-start').addEventListener('click', () => {
   document.querySelectorAll('.hcol').forEach(c => c.classList.remove('active'));
   const startCol = document.querySelector('.hcol.is-start');
   if (startCol) startCol.classList.add('active');
-});
-
-document.getElementById('mode-btn').addEventListener('click', function () {
-  modeIdx = (modeIdx + 1) % MODES.length;
-  this.textContent = '👁 ' + MODES[modeIdx];
 });
 
 // ── Init ──────────────────────────────────────────────────
