@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 from .detector import Detector
 from .reframer import smooth_position, crop_fixed, transform_keypoints
-from .overlay import draw_com, draw_skeleton
+from .overlay import draw_com, draw_skeleton, draw_deviation
 
 TRAIL_LEN = 40   # frames of CoM history to show
 
@@ -87,6 +87,7 @@ def run(
     show_com: bool = False,
     show_skeleton: bool = False,
     show_balance: bool = False,
+    show_deviation: bool = False,
     balance_json_path: str = None,
     track_holds: bool = False,
     route_json_path: str = None,
@@ -103,6 +104,12 @@ def run(
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     detector = Detector()
+
+    mean_com_x = None
+    if show_deviation:
+        print("Estimating mean CoM x-position (deviation pre-pass)...")
+        mean_com_x = estimate_mean_com_x(input_path, detector)
+        print(f"  mean CoM x = {mean_com_x}")
 
     # --- Hold detection (optional) ---
     holds = []        # SAM-mask holds (legacy path)
@@ -223,6 +230,10 @@ def run(
             else:
                 # No keypoints — draw just the CoM dot so something is always visible
                 draw_skeleton(cropped, None, None, com_out, list(com_trail))
+
+            if show_deviation and mean_com_x is not None:
+                ideal_x_out = to_out(mean_com_x, smooth_cy)[0]
+                draw_deviation(cropped, com_out, ideal_x_out)
 
         elif show_com:
             draw_com(cropped, out_w // 2, out_h // 2)
