@@ -21,6 +21,18 @@ def index():
     return send_from_directory("viewer", "index.html")
 
 
+@app.route("/compare")
+def compare():
+    return send_from_directory("viewer", "compare.html")
+
+
+@app.route("/videos/<path:filename>")
+def serve_video(filename):
+    # Videos live two levels up from the worktree
+    video_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+    return send_from_directory(video_dir, filename)
+
+
 @app.route("/output/<path:filename>")
 def serve_output(filename):
     return send_from_directory(OUTPUT_DIR, filename)

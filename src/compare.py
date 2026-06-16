@@ -10,6 +10,7 @@ Usage:
 """
 import argparse
 import json
+import math
 import os
 import tempfile
 
@@ -17,10 +18,11 @@ from .pipeline import run as pipeline_run
 
 
 def _run_player(video_path: str, route_json_path: str, label: str) -> dict:
-    """Run pipeline for one video, return extracted data (no output video kept)."""
-    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as vf:
-        output_path = vf.name
-    balance_path = output_path.replace(".mp4", "_balance.json")
+    """Run pipeline for one video, keep processed video, return extracted data."""
+    os.makedirs("output", exist_ok=True)
+    slug = "p1" if "1" in label else "p2"
+    output_path  = f"output/{slug}_processed.mp4"
+    balance_path = f"output/{slug}_balance.json"
     timeline_path = output_path.replace(".mp4", "_timeline.json")
 
     print(f"\n=== Processing {label} ({os.path.basename(video_path)}) ===")
@@ -32,8 +34,8 @@ def _run_player(video_path: str, route_json_path: str, label: str) -> dict:
         smoothing_alpha=0.10,
         person_fill=0.65,
         show_com=False,
-        show_skeleton=False,
-        show_balance=True,
+        show_skeleton=True,
+        show_balance=False,
         balance_json_path=balance_path,
         track_holds=True,
         route_json_path=route_json_path,
@@ -49,20 +51,16 @@ def _run_player(video_path: str, route_json_path: str, label: str) -> dict:
         with open(timeline_path) as f:
             timeline = json.load(f)
 
-    # Cleanup temp video
-    try:
-        os.unlink(output_path)
-    except OSError:
-        pass
+    return {
+        "label": label,
+        "video": os.path.basename(output_path),
+        "balance": balance,
+        "timeline": timeline,
+    }
 
-    return {"label": label, "balance": balance, "timeline": timeline}
 
-
-def _hold_progress(timeline: dict) -> list[dict]:
-    """
-    Derive per-frame route progress: highest hold id touched (any limb) up to that frame.
-    Returns list of {frame, t, hold_id} for frames where a new hold is first touched.
-    """
+def _hold_progress(timeline: dict) -> list:
+    """Hold events: first time any limb reaches each hold (ascending route)."""
     if not timeline or "frames" not in timeline:
         return []
 
@@ -71,8 +69,6 @@ def _hold_progress(timeline: dict) -> list[dict]:
     for row in timeline["frames"]:
         touched = [v for v in [row.get("LH"), row.get("RH"), row.get("LF"), row.get("RF")] if v is not None]
         if touched:
-            # lower hold id = higher on wall = more progress (id 0 = top)
-            # "best progress" = smallest id seen so far
             min_id = min(touched)
             if best == -1 or min_id < best:
                 best = min_id
@@ -80,46 +76,119 @@ def _hold_progress(timeline: dict) -> list[dict]:
     return events
 
 
+def _route_start(timeline: dict, start_hold_id: int, fps: float) -> float | None:
+    """
+    Find when both wrists are simultaneously on the start hold (≥3 consecutive frames).
+    Falls back to first frame where either wrist is on the start hold.
+    """
+    if not timeline or "frames" not in timeline:
+        return None
+
+    streak = 0
+    streak_start_t = None
+    first_single = None
+
+    for row in timeline["frames"]:
+        lh, rh = row.get("LH"), row.get("RH")
+        both = (lh == start_hold_id and rh == start_hold_id)
+        either = (lh == start_hold_id or rh == start_hold_id)
+
+        if both:
+            if streak == 0:
+                streak_start_t = row["t"]
+            streak += 1
+            if streak >= 3:
+                return streak_start_t
+        else:
+            streak = 0
+            streak_start_t = None
+
+        if either and first_single is None:
+            first_single = row["t"]
+
+    return first_single  # fallback: first single-hand contact
+
+
+def _com_path_length(com_path: list) -> float:
+    """Total Euclidean distance of CoM trail in source pixels."""
+    total = 0.0
+    for i in range(1, len(com_path)):
+        dx = com_path[i]["x"] - com_path[i-1]["x"]
+        dy = com_path[i]["y"] - com_path[i-1]["y"]
+        total += math.sqrt(dx*dx + dy*dy)
+    return round(total, 1)
+
+
+def _com_lateral_jitter(com_path: list) -> float:
+    """Std-dev of CoM x-position (lateral stability, lower = smoother)."""
+    if not com_path:
+        return 0.0
+    xs = [p["x"] for p in com_path]
+    mean = sum(xs) / len(xs)
+    variance = sum((x - mean)**2 for x in xs) / len(xs)
+    return round(math.sqrt(variance), 1)
+
+
 def run_comparison(p1_path: str, p2_path: str, route_json_path: str, out_path: str) -> None:
     with open(route_json_path) as f:
         route = json.load(f)
 
+    start_hold_id = next(h["id"] for h in route["holds"] if h["role"] == "start")
+    top_hold_id   = next(h["id"] for h in route["holds"] if h["role"] == "top")
+
     p1 = _run_player(p1_path, route_json_path, "player1")
     p2 = _run_player(p2_path, route_json_path, "player2")
 
-    # Build CoM source-coord paths (sx, sy per frame)
-    def com_path(balance: dict) -> list:
-        frames = balance.get("frames", [])
-        return [
+    def build_player(data):
+        fps      = data["balance"].get("fps", 30)
+        frames   = data["balance"].get("frames", [])
+        com_path = [
             {"f": r["f"], "x": r["sx"], "y": r["sy"]}
-            for r in frames
-            if "sx" in r and "sy" in r
+            for r in frames if "sx" in r and "sy" in r
         ]
+        hold_events  = _hold_progress(data["timeline"])
+        route_start  = _route_start(data["timeline"], start_hold_id, fps)
+        top_event    = next((e for e in hold_events if e["hold_id"] == top_hold_id), None)
+        route_end    = top_event["t"] if top_event else None
+        route_duration = round(route_end - route_start, 2) if (route_start and route_end) else None
+
+        # CoM stats only during the climb (after route_start)
+        climb_com = [p for p in com_path if route_start is None or p["f"] >= round(route_start * fps)]
+        path_len  = _com_path_length(climb_com)
+        lat_jitter = _com_lateral_jitter(climb_com)
+
+        return {
+            "label":          data["label"],
+            "video":          data["video"],
+            "fps":            fps,
+            "com_path":       com_path,
+            "hold_events":    hold_events,
+            "route_start_t":  route_start,
+            "route_end_t":    route_end,
+            "route_duration": route_duration,
+            "com_path_length": path_len,
+            "com_lateral_jitter": lat_jitter,
+        }
 
     comparison = {
-        "route": route,
-        "player1": {
-            "label": "Player 1",
-            "fps": p1["balance"].get("fps", 30),
-            "com_path": com_path(p1["balance"]),
-            "hold_events": _hold_progress(p1["timeline"]),
-        },
-        "player2": {
-            "label": "Player 2",
-            "fps": p2["balance"].get("fps", 30),
-            "com_path": com_path(p2["balance"]),
-            "hold_events": _hold_progress(p2["timeline"]),
-        },
+        "route":   route,
+        "player1": build_player(p1),
+        "player2": build_player(p2),
     }
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     with open(out_path, "w") as f:
         json.dump(comparison, f, separators=(",", ":"))
+
+    def _fmt(p):
+        d = p["route_duration"]
+        return f"{d:.1f}s" if d else "n/a"
+
     print(f"\nComparison JSON → {out_path}")
-    print(f"  P1: {len(comparison['player1']['com_path'])} CoM frames, "
-          f"{len(comparison['player1']['hold_events'])} hold events")
-    print(f"  P2: {len(comparison['player2']['com_path'])} CoM frames, "
-          f"{len(comparison['player2']['hold_events'])} hold events")
+    print(f"  P1: start={p1['label']} route_start={comparison['player1']['route_start_t']}  dur={_fmt(comparison['player1'])}")
+    print(f"  P2: start={p2['label']} route_start={comparison['player2']['route_start_t']}  dur={_fmt(comparison['player2'])}")
+    print(f"  P1 CoM length={comparison['player1']['com_path_length']}  jitter={comparison['player1']['com_lateral_jitter']}")
+    print(f"  P2 CoM length={comparison['player2']['com_path_length']}  jitter={comparison['player2']['com_lateral_jitter']}")
 
 
 if __name__ == "__main__":

@@ -242,13 +242,14 @@ def run(
             json.dump({"fps": fps, "frames": _balance_frames}, f, separators=(",", ":"))
         print(f"Balance JSON → {out_json}")
 
-    if track_holds and holds:
+    if track_holds and (holds or route_holds):
         timeline_path = os.path.splitext(output_path)[0] + "_timeline.json"
-        timeline = {
-            "fps": fps,
-            "holds": [{"id": h["id"], "center": list(h["center"]), "bbox": list(h["bbox"])} for h in holds],
-            "frames": timeline_frames,
-        }
+        hold_meta = (
+            [{"id": h["id"], "x": h["x"], "y": h["y"], "r": h["r"], "role": h.get("role", "mid")} for h in route_holds]
+            if route_holds
+            else [{"id": h["id"], "center": list(h["center"]), "bbox": list(h["bbox"])} for h in holds]
+        )
+        timeline = {"fps": fps, "holds": hold_meta, "frames": timeline_frames}
         with open(timeline_path, "w") as f:
             json.dump(timeline, f)
         print(f"Timeline → {timeline_path}")
