@@ -23,9 +23,11 @@ html, body { height: 100%; background: #0a0a0a; color: #fff;
 
 /* ── Composite canvas ───────────────────────────────────── */
 #stage {
-  flex: 1; position: relative; background: #000; min-height: 0;
-  display: flex; align-items: center; justify-content: center;
+  flex: 1; background: #000; min-height: 0;
+  display: flex; flex-direction: row; align-items: center; justify-content: center;
+  gap: 12px;
 }
+#video-wrap { position: relative; display: flex; align-items: center; justify-content: center; }
 #composite { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
 
 /* Route-Zeit overlay */
@@ -36,27 +38,24 @@ html, body { height: 100%; background: #0a0a0a; color: #fff;
   pointer-events: none;
 }
 
-/* ── Winner banner ──────────────────────────────────────── */
-#winner {
-  flex-shrink: 0;
-  display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
-  background: #111; border-top: 1px solid #1e1e1e;
+/* ── Onboarding hint ───────────────────────────────────── */
+#onboarding {
+  position: absolute; inset: 0; background: rgba(0,0,0,.75);
+  display: flex; align-items: center; justify-content: center; z-index: 10;
 }
-.stat-pill {
-  padding: 10px 12px;
-  background: #0d0d0d;
-  display: flex; flex-direction: column; gap: 2px;
+#onboarding-card {
+  background: #161616; border: 1px solid #2a2a2a; border-radius: 14px;
+  padding: 22px 24px; max-width: 280px; text-align: center;
 }
-.stat-pill .label { font-size: 10px; opacity: .4; text-transform: uppercase; letter-spacing: .06em; }
-.stat-pill .value { font-size: 18px; font-weight: 800; }
-.stat-pill .sub   { font-size: 11px; opacity: .5; }
-.faster  { color: #4aaeff; }
-.slower  { color: #ffaa44; }
-.neutral { color: #aaa; }
+#onboarding-card p { font-size: 14px; line-height: 1.5; opacity: .85; margin-bottom: 16px; }
+#onboarding-card button {
+  background: #4aaeff; border: none; color: #06121e;
+  padding: 8px 20px; border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer;
+}
 
 /* ── Vertical route rail ───────────────────────────────── */
 #rail {
-  position: absolute; right: 12px; top: 40px; bottom: 40px; width: 36px;
+  position: relative; align-self: stretch; width: 36px;
   cursor: pointer;
 }
 #rail::before {
@@ -123,23 +122,17 @@ html, body { height: 100%; background: #0a0a0a; color: #fff;
 
   <!-- Overlay canvas -->
   <div id="stage">
-    <canvas id="composite"></canvas>
-    <div id="route-time">t +0.0s</div>
+    <div id="video-wrap">
+      <canvas id="composite"></canvas>
+      <div id="route-time">t +0.0s</div>
+      <div id="onboarding">
+        <div id="onboarding-card">
+          <p>Scroll or drag up on the video to climb the route.<br>Hold to compare with the other climber.</p>
+          <button id="onboarding-dismiss">Got it</button>
+        </div>
+      </div>
+    </div>
     <div id="rail"><div id="rail-fill"></div></div>
-  </div>
-
-  <!-- Stats -->
-  <div id="winner">
-    <div class="stat-pill" id="sp-time">
-      <div class="label">Routenzeit</div>
-      <div class="value neutral">—</div>
-      <div class="sub">—</div>
-    </div>
-    <div class="stat-pill" id="sp-com">
-      <div class="label">CoM-Pfad</div>
-      <div class="value neutral">—</div>
-      <div class="sub">—</div>
-    </div>
   </div>
 
   <!-- Controls -->
@@ -164,7 +157,8 @@ let holding = false;  // true while mouse is pressed on video or rail → show P
 // ── Resize canvas to match stage ─────────────────────────
 function resize() {
   const stage = document.getElementById('stage');
-  const stageW = stage.clientWidth;
+  const railW = document.getElementById('rail').offsetWidth;
+  const stageW = stage.clientWidth - railW - 12; // minus rail + gap
   const stageH = stage.clientHeight;
   const aspect = SRC_W / SRC_H;
   let w = stageW, h = stageW / aspect;
@@ -350,39 +344,10 @@ function jumpToHold(holdId) {
     c.classList.toggle('active', parseInt(c.dataset.id) === holdId));
 }
 
-// ── Stats ─────────────────────────────────────────────────
-function buildStats() {
-  const p1 = data.player1, p2 = data.player2;
-
-  // Time
-  const d1 = p1.route_duration, d2 = p2.route_duration;
-  const spTime = document.getElementById('sp-time');
-  if (d1 && d2) {
-    const faster = d1 < d2 ? 'P1' : 'P2';
-    const diff = Math.abs(d1 - d2).toFixed(1);
-    const fColor = d1 < d2 ? 'faster' : 'slower';
-    const sColor = d1 < d2 ? 'slower' : 'faster';
-    spTime.querySelector('.value').textContent = `${faster} +${diff}s`;
-    spTime.querySelector('.value').className = `value ${fColor}`;
-    spTime.querySelector('.sub').textContent =
-      `P1: ${d1?.toFixed(1) ?? '—'}s · P2: ${d2?.toFixed(1) ?? '—'}s`;
-  }
-
-  // CoM
-  const l1 = p1.com_path_length, l2 = p2.com_path_length;
-  const spCom = document.getElementById('sp-com');
-  if (l1 && l2) {
-    const eff = d1 > 0 ? l1 / d1 : 0;
-    const eff2 = d2 > 0 ? l2 / d2 : 0;
-    const better = eff < eff2 ? 'P1' : 'P2';
-    const pct = Math.round(Math.abs(eff - eff2) / Math.max(eff, eff2) * 100);
-    const bColor = eff < eff2 ? 'faster' : 'slower';
-    spCom.querySelector('.value').textContent = `${better} ${pct}% effizienter`;
-    spCom.querySelector('.value').className = `value ${bColor}`;
-    spCom.querySelector('.sub').textContent =
-      `P1: ${Math.round(l1 / 100)} · P2: ${Math.round(l2 / 100)} (px/100)`;
-  }
-}
+// ── Onboarding hint (shown once on load) ──────────────────
+document.getElementById('onboarding-dismiss').addEventListener('click', () => {
+  document.getElementById('onboarding').style.display = 'none';
+});
 
 // ── Controls ──────────────────────────────────────────────
 document.getElementById('btn-start').addEventListener('click', () => {
@@ -399,7 +364,6 @@ function onComparisonLoaded(d) {
   p2s = d.player2.route_start_t ?? 0;
 
   buildRail();
-  buildStats();
   resize();
 
   // Jump both to start hold moment
