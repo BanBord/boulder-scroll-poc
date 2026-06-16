@@ -97,7 +97,6 @@ html, body { height: 100%; background: #0a0a0a; color: #fff;
   font-weight: 600; cursor: pointer; flex-shrink: 0;
 }
 .ctrl-btn:active { background: #333; }
-#btn-play { min-width: 76px; }
 #route-progress {
   flex: 1; height: 3px; background: #2a2a2a; border-radius: 2px;
   position: relative; cursor: pointer;
@@ -142,7 +141,6 @@ html, body { height: 100%; background: #0a0a0a; color: #fff;
 
   <!-- Controls -->
   <div id="controls">
-    <button class="ctrl-btn" id="btn-play">▶ Play</button>
     <button class="ctrl-btn" id="btn-start">↩ Start</button>
     <div id="route-progress"><div id="rp-fill"></div></div>
   </div>
@@ -159,7 +157,7 @@ const v2 = document.getElementById('v2');
 const cvs = document.getElementById('composite');
 const ctx = cvs.getContext('2d');
 
-let data = null, playing = false;
+let data = null;
 let p1s = 0, p2s = 0; // route_start_t offsets
 
 // ── Resize canvas to match stage ─────────────────────────
@@ -222,20 +220,37 @@ function updateRouteTime() {
   }
 }
 
+// ── Route-time control: the one place that sets currentTime ─
+// rt = seconds since route_start_t, shared by both players.
+function maxRouteDuration() {
+  return Math.max(
+    data?.player1?.route_duration || 0,
+    data?.player2?.route_duration || 0
+  );
+}
+
+// Upper bound for scrubbing: known route_duration if both players reached
+// the top hold, otherwise fall back to whichever video runs longer past
+// its own route_start_t (route_duration can be null — see Task 0 note).
+function maxRouteTime() {
+  const known = maxRouteDuration();
+  if (known > 0) return known;
+  return Math.max((v1.duration || 0) - p1s, (v2.duration || 0) - p2s, 0);
+}
+
+function setRouteTime(rt) {
+  if (!data) return;
+  rt = Math.max(0, Math.min(rt, maxRouteTime()));
+  v1.currentTime = Math.max(0, Math.min(p1s + rt, v1.duration || Infinity));
+  v2.currentTime = Math.max(0, Math.min(p2s + rt, v2.duration || Infinity));
+  updateRouteTime();
+}
+
 // ── RAF loop ──────────────────────────────────────────────
 function loop() {
   resize(); // no-op if size unchanged since we only set once
   drawFrame();
-  if (data) {
-    updateRouteTime();
-    // Keep v2 in sync with v1 (route-time based)
-    if (playing && !v1.paused) {
-      const target2 = v1.currentTime - p1s + p2s;
-      if (Math.abs(v2.currentTime - target2) > 0.15) {
-        v2.currentTime = Math.max(0, target2);
-      }
-    }
-  }
+  if (data) updateRouteTime();
   requestAnimationFrame(loop);
 }
 
@@ -326,22 +341,8 @@ function buildStats() {
 }
 
 // ── Controls ──────────────────────────────────────────────
-function pauseBoth() {
-  v1.pause(); v2.pause(); playing = false;
-  document.getElementById('btn-play').textContent = '▶ Play';
-}
-
-document.getElementById('btn-play').addEventListener('click', function () {
-  playing = !playing;
-  this.textContent = playing ? '⏸ Pause' : '▶ Play';
-  if (playing) { v1.play(); v2.play(); }
-  else pauseBoth();
-});
-
 document.getElementById('btn-start').addEventListener('click', () => {
-  v1.currentTime = p1s;
-  v2.currentTime = p2s;
-  pauseBoth();
+  setRouteTime(0);
   document.querySelectorAll('.hcol').forEach(c => c.classList.remove('active'));
   const startCol = document.querySelector('.hcol.is-start');
   if (startCol) startCol.classList.add('active');
@@ -351,8 +352,6 @@ document.getElementById('mode-btn').addEventListener('click', function () {
   modeIdx = (modeIdx + 1) % MODES.length;
   this.textContent = '👁 ' + MODES[modeIdx];
 });
-
-[v1, v2].forEach(v => v.addEventListener('ended', pauseBoth));
 
 // ── Init ──────────────────────────────────────────────────
 fetch('/output/comparison.json')
@@ -367,8 +366,7 @@ fetch('/output/comparison.json')
     resize();
 
     // Jump both to start hold moment
-    v1.currentTime = p1s;
-    v2.currentTime = p2s;
+    setRouteTime(0);
 
     // Highlight start hold
     const startHold = d.route.holds.find(h => h.role === 'start');
