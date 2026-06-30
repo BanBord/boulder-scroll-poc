@@ -185,3 +185,65 @@ def test_lab_to_hex_blue():
     assert h.startswith("#") and len(h) == 7
     r, g, b = int(h[1:3], 16), int(h[3:5], 16), int(h[5:7], 16)
     assert b > r and b > g, f"expected blue dominant, got {h}"
+
+
+# ── _passes_tag_filter ────────────────────────────────────────────────────────
+
+from src.wall_scan import _passes_tag_filter
+
+
+def _rect_segment(shape, x, y, w, h):
+    seg = np.zeros(shape, dtype=bool)
+    seg[y:y + h, x:x + w] = True
+    return seg
+
+
+def test_tag_filter_accepts_typical_sticker():
+    """Bright low-saturation rectangle, 60×30, near a hold → passes."""
+    frame = np.full((600, 600, 3), 110, dtype=np.uint8)  # grey wall
+    seg = _rect_segment((600, 600), 200, 200, 60, 30)
+    frame[200:230, 200:260] = (235, 235, 235)            # bright white-ish patch
+    diag = float(np.sqrt(600 ** 2 + 600 ** 2))
+    assert _passes_tag_filter(seg, (200, 200, 60, 30), frame,
+                              nearest_hold_dist_px=8.0, image_diag_px=diag)
+
+
+def test_tag_filter_rejects_coloured_hold():
+    """Saturated red rectangle, even if size matches → rejected."""
+    frame = np.full((600, 600, 3), 110, dtype=np.uint8)
+    seg = _rect_segment((600, 600), 200, 200, 60, 30)
+    frame[200:230, 200:260] = (40, 40, 220)              # saturated red
+    diag = float(np.sqrt(600 ** 2 + 600 ** 2))
+    assert not _passes_tag_filter(seg, (200, 200, 60, 30), frame,
+                                  nearest_hold_dist_px=8.0, image_diag_px=diag)
+
+
+def test_tag_filter_rejects_wall_dot():
+    """Tiny dark dot (8×8) → fails area minimum."""
+    frame = np.full((600, 600, 3), 110, dtype=np.uint8)
+    seg = _rect_segment((600, 600), 100, 100, 8, 8)
+    frame[100:108, 100:108] = (40, 40, 40)
+    diag = float(np.sqrt(600 ** 2 + 600 ** 2))
+    assert not _passes_tag_filter(seg, (100, 100, 8, 8), frame,
+                                  nearest_hold_dist_px=8.0, image_diag_px=diag)
+
+
+def test_tag_filter_rejects_far_from_any_hold():
+    """Otherwise-valid tag patch sitting 20 % of the image away from any hold → rejected."""
+    frame = np.full((600, 600, 3), 110, dtype=np.uint8)
+    seg = _rect_segment((600, 600), 200, 200, 60, 30)
+    frame[200:230, 200:260] = (235, 235, 235)
+    diag = float(np.sqrt(600 ** 2 + 600 ** 2))
+    far = 0.20 * diag
+    assert not _passes_tag_filter(seg, (200, 200, 60, 30), frame,
+                                  nearest_hold_dist_px=far, image_diag_px=diag)
+
+
+def test_tag_filter_rejects_when_no_hold_in_scene():
+    """nearest_hold_dist=None (no holds anywhere) → reject conservatively."""
+    frame = np.full((600, 600, 3), 110, dtype=np.uint8)
+    seg = _rect_segment((600, 600), 200, 200, 60, 30)
+    frame[200:230, 200:260] = (235, 235, 235)
+    diag = float(np.sqrt(600 ** 2 + 600 ** 2))
+    assert not _passes_tag_filter(seg, (200, 200, 60, 30), frame,
+                                  nearest_hold_dist_px=None, image_diag_px=diag)

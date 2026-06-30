@@ -167,6 +167,66 @@ def _chroma(lab) -> float:
     return float(np.sqrt((lab[1] - 128.0) ** 2 + (lab[2] - 128.0) ** 2))
 
 
+# Tag filter thresholds (see spec).
+_TAG_AREA_FRAC_MIN = 0.0005
+_TAG_AREA_FRAC_MAX = 0.005
+_TAG_ASPECT_MIN    = 1.5
+_TAG_ASPECT_MAX    = 5.0
+_TAG_CHROMA_MAX    = 12.0
+_TAG_L_MIN         = 140.0
+_TAG_HOLD_DIST_FRAC = 0.04
+
+
+def _passes_tag_filter(seg_bool: np.ndarray,
+                       bbox: Tuple[int, int, int, int],
+                       frame_bgr: np.ndarray,
+                       nearest_hold_dist_px: Optional[float],
+                       image_diag_px: float) -> bool:
+    """A SAM segment is a Start/Top tag if all of:
+
+    - Area within [TAG_AREA_FRAC_MIN, TAG_AREA_FRAC_MAX] of the frame
+    - Bounding-box aspect (w/h) within [TAG_ASPECT_MIN, TAG_ASPECT_MAX]
+    - Median Lab chroma ≤ TAG_CHROMA_MAX (white/grey paper, not coloured)
+    - Median Lab L ≥ TAG_L_MIN (excludes wall dots, dark shadows)
+    - Centre within TAG_HOLD_DIST_FRAC × image_diag of the nearest hold
+
+    nearest_hold_dist_px = None means no holds in the scene → reject.
+    """
+    if nearest_hold_dist_px is None:
+        return False
+    h_img, w_img = frame_bgr.shape[:2]
+    frame_area = float(h_img * w_img)
+
+    _, _, w, h = bbox
+    if w <= 0 or h <= 0:
+        return False
+
+    area = float(seg_bool.sum())
+    area_frac = area / frame_area
+    if not (_TAG_AREA_FRAC_MIN <= area_frac <= _TAG_AREA_FRAC_MAX):
+        return False
+
+    aspect = float(w) / float(h)
+    if not (_TAG_ASPECT_MIN <= aspect <= _TAG_ASPECT_MAX):
+        return False
+
+    if nearest_hold_dist_px > _TAG_HOLD_DIST_FRAC * image_diag_px:
+        return False
+
+    lab = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2LAB)
+    pixels = lab[seg_bool]
+    if pixels.size == 0:
+        return False
+    L = float(np.median(pixels[:, 0]))
+    a = float(np.median(pixels[:, 1]))
+    b = float(np.median(pixels[:, 2]))
+    if L < _TAG_L_MIN:
+        return False
+    if _chroma((L, a, b)) > _TAG_CHROMA_MAX:
+        return False
+    return True
+
+
 def _lab_to_hex(lab: Tuple[float, float, float]) -> str:
     """OpenCV-encoded Lab (L: 0..255, a/b: 0..255 offset 128) → sRGB hex."""
     lab_u8 = np.array([[[int(round(lab[0])), int(round(lab[1])), int(round(lab[2]))]]],
