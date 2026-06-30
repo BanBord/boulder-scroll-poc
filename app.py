@@ -120,6 +120,12 @@ def scan_tests_page():
     return send_from_directory("viewer", "scan_tests.html")
 
 
+@app.route("/scan_selection.js")
+def serve_scan_selection_module():
+    return send_from_directory("viewer", "scan_selection.js",
+                               mimetype="application/javascript")
+
+
 @app.route("/scan", methods=["POST"])
 def scan_image():
     """Take an uploaded wall photo, run wall_scan synchronously, write JSON.
