@@ -107,6 +107,12 @@ _TAG_ASPECT_MAX    = 5.0
 _TAG_CHROMA_MAX    = 12.0
 _TAG_L_MIN         = 140.0
 _TAG_HOLD_DIST_FRAC = 0.04
+# Reject segments whose longer bbox dimension exceeds this fraction of the
+# shorter frame edge. A real Start/Top sticker is small (≤ ~10 % of the
+# narrower frame side); bright horizontal artefacts like window-light strips
+# at the top of wall photos can pass the area + aspect + chroma + L gates
+# but cleanly fail this absolute size cap.
+_TAG_MAX_DIM_FRAC  = 0.10
 
 
 def _passes_tag_filter(seg_bool: np.ndarray,
@@ -118,6 +124,9 @@ def _passes_tag_filter(seg_bool: np.ndarray,
 
     - Area within [TAG_AREA_FRAC_MIN, TAG_AREA_FRAC_MAX] of the frame
     - Bounding-box aspect (w/h) within [TAG_ASPECT_MIN, TAG_ASPECT_MAX]
+    - Longer bbox dimension ≤ TAG_MAX_DIM_FRAC of the shorter frame edge
+      (drops oversized horizontal artefacts like window-light bands that
+      pass area + aspect + chroma but are obviously not stickers)
     - Median Lab chroma ≤ TAG_CHROMA_MAX (white/grey paper, not coloured)
     - Median Lab L ≥ TAG_L_MIN (excludes wall dots, dark shadows)
     - Centre within TAG_HOLD_DIST_FRAC × image_diag of the nearest hold
@@ -140,6 +149,9 @@ def _passes_tag_filter(seg_bool: np.ndarray,
 
     aspect = float(w) / float(h)
     if not (_TAG_ASPECT_MIN <= aspect <= _TAG_ASPECT_MAX):
+        return False
+
+    if max(w, h) > _TAG_MAX_DIM_FRAC * min(h_img, w_img):
         return False
 
     if nearest_hold_dist_px > _TAG_HOLD_DIST_FRAC * image_diag_px:

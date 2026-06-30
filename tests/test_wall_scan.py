@@ -171,6 +171,22 @@ def test_tag_filter_rejects_when_no_hold_in_scene():
                                   nearest_hold_dist_px=None, image_diag_px=diag)
 
 
+def test_tag_filter_rejects_window_light_strip():
+    """A wide horizontal bright band at the top of the frame must be rejected
+    even when it passes area/aspect/chroma/L — replicates the false positive
+    we hit on Wall_Holds_img.png where a window light strip 503 px wide × 101
+    px tall at y=0 was being classified as a tag."""
+    frame = np.full((2160, 3840, 3), 110, dtype=np.uint8)
+    # 503 × 101 band near the top, bright low-chroma
+    band = _rect_segment((2160, 3840), 281, 0, 503, 101)
+    frame[0:101, 281:784] = (235, 235, 235)
+    diag = float(np.sqrt(2160 ** 2 + 3840 ** 2))
+    # nearest hold sits 30 px away so the distance gate doesn't catch it
+    assert not _passes_tag_filter(band, (281, 0, 503, 101), frame,
+                                  nearest_hold_dist_px=30.0, image_diag_px=diag), \
+        "503 px wide band must be rejected by the absolute-size cap"
+
+
 # ── detect_tags ────────────────────────────────────────────────────────────────
 
 def test_detect_tags_assigns_nearest_hold():
