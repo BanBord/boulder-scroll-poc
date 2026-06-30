@@ -99,7 +99,7 @@ export function assignStartTopSpatial({routeIds, holds, imageSize}) {
   }
   const sortedYAsc = list.slice().sort((a, b) => a.center[1] - b.center[1]);
   const topId = sortedYAsc[0].id;
-  const sortedYDesc = list.slice().reverse();
+  const sortedYDesc = sortedYAsc.slice().reverse();
   const bottom = sortedYDesc[0];
   const startIds = [bottom.id];
   const [W, H] = imageSize;
