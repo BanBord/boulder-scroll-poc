@@ -147,12 +147,6 @@ body { min-height: 100vh; min-height: 100svh; display: flex; justify-content: ce
 }
 .pencil svg { width: 18px; height: 18px; }
 
-.dots {
-  display: flex; gap: 6px; justify-content: center;
-  margin-bottom: 12px; margin-top: -4px;
-}
-.dot { width: 6px; height: 6px; border-radius: 50%; background: #d1d5db; }
-.dot.active { background: var(--text-primary); width: 22px; border-radius: 999px; }
 
 /* Tooltip — image-anchored, used in Phase 1 for debugging */
 .hold-tooltip {
@@ -218,7 +212,6 @@ body { min-height: 100vh; min-height: 100svh; display: flex; justify-content: ce
     <!-- Bottom sheet (state-driven) -->
     <div class="sheet">
       <div class="grabber"></div>
-      <div class="dots" id="dots"></div>
       <div id="sheet-content"></div>
     </div>
 
@@ -272,7 +265,6 @@ import {
       $('upload-landing').style.display = 'none';
       $('scan-view').classList.add('active');
       resizeCanvas();
-      buildDots();
       enterAllMode();
     } catch (err) {
       status.textContent = 'Error: ' + err.message;
@@ -460,7 +452,6 @@ import {
     state.topId = topId;
     state.source = source;
     render();
-    updateDots();
     setSheetRoute();
   }
 
@@ -472,7 +463,6 @@ import {
     state.topId = null;
     state.source = null;
     render();
-    updateDots();
     setSheetAll();
   }
 
@@ -537,24 +527,6 @@ import {
 
   function togglePencil()         { /* Task 10 */ }
   function toggleHoldInRoute(_id) { /* Task 10 */ }
-
-  function buildDots() {
-    const dots = $('dots');
-    dots.innerHTML = '';
-    const n = state.scan.routes_hint?.count ?? 0;
-    for (let i = 0; i < n; i++) {
-      const d = document.createElement('div');
-      d.className = 'dot';
-      dots.appendChild(d);
-    }
-    updateDots();
-  }
-  function updateDots() {
-    const els = $('dots').children;
-    for (let i = 0; i < els.length; i++) {
-      els[i].classList.toggle('active', state.mode === 'route' && i === 0);
-    }
-  }
 </script>
 
 </body>
