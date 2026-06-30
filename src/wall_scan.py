@@ -227,6 +227,45 @@ def _passes_tag_filter(seg_bool: np.ndarray,
     return True
 
 
+def detect_tags(segments: List[Dict], holds: List[Dict],
+                frame_bgr: np.ndarray) -> List[Dict]:
+    """Walk SAM segments, classify Start/Top tags, attach nearest hold.
+
+    Returns ``[{id, bbox, center, nearest_hold_id}]``. IDs sequential.
+    Empty list when no holds were detected (no anchor for nearest-hold check).
+    """
+    if not holds:
+        return []
+
+    h_img, w_img = frame_bgr.shape[:2]
+    diag = float(np.sqrt(w_img * w_img + h_img * h_img))
+    hold_centres = np.array([h["center"] for h in holds], dtype=np.float32)
+    hold_ids     = [h["id"] for h in holds]
+
+    tags = []
+    for m in segments:
+        seg = m["segmentation"].astype(bool)
+        x, y, w, hh = m["bbox"]
+        bbox = (int(x), int(y), int(w), int(hh))
+        cx, cy = float(x + w / 2.0), float(y + hh / 2.0)
+
+        d = np.linalg.norm(hold_centres - np.array([cx, cy], dtype=np.float32), axis=1)
+        nearest_idx = int(np.argmin(d))
+        nearest_dist = float(d[nearest_idx])
+
+        if not _passes_tag_filter(seg, bbox, frame_bgr,
+                                  nearest_hold_dist_px=nearest_dist,
+                                  image_diag_px=diag):
+            continue
+        tags.append({
+            "id":              len(tags),
+            "bbox":            [bbox[0], bbox[1], bbox[2], bbox[3]],
+            "center":          [cx, cy],
+            "nearest_hold_id": int(hold_ids[nearest_idx]),
+        })
+    return tags
+
+
 def _lab_to_hex(lab: Tuple[float, float, float]) -> str:
     """OpenCV-encoded Lab (L: 0..255, a/b: 0..255 offset 128) → sRGB hex."""
     lab_u8 = np.array([[[int(round(lab[0])), int(round(lab[1])), int(round(lab[2]))]]],

@@ -247,3 +247,45 @@ def test_tag_filter_rejects_when_no_hold_in_scene():
     diag = float(np.sqrt(600 ** 2 + 600 ** 2))
     assert not _passes_tag_filter(seg, (200, 200, 60, 30), frame,
                                   nearest_hold_dist_px=None, image_diag_px=diag)
+
+
+# ── detect_tags ────────────────────────────────────────────────────────────────
+
+def test_detect_tags_assigns_nearest_hold():
+    """Two holds, one tag closer to hold 1 → nearest_hold_id == 1."""
+    from src.wall_scan import detect_tags
+    frame = np.full((600, 600, 3), 110, dtype=np.uint8)
+    frame[200:230, 200:260] = (235, 235, 235)  # tag at (230, 215)
+    seg = _rect_segment((600, 600), 200, 200, 60, 30)
+    segments = [{"segmentation": seg, "bbox": (200, 200, 60, 30)}]
+    holds = [
+        {"id": 0, "center": (500.0, 500.0)},
+        {"id": 1, "center": (210.0, 230.0)},  # near the tag
+    ]
+    tags = detect_tags(segments, holds, frame)
+    assert len(tags) == 1
+    assert tags[0]["nearest_hold_id"] == 1
+    assert tags[0]["id"] == 0
+
+
+def test_detect_tags_skips_segments_failing_filter():
+    """Coloured segment → skipped."""
+    from src.wall_scan import detect_tags
+    frame = np.full((600, 600, 3), 110, dtype=np.uint8)
+    frame[200:230, 200:260] = (40, 40, 220)    # red, not a tag
+    seg = _rect_segment((600, 600), 200, 200, 60, 30)
+    segments = [{"segmentation": seg, "bbox": (200, 200, 60, 30)}]
+    holds = [{"id": 0, "center": (210.0, 230.0)}]
+    tags = detect_tags(segments, holds, frame)
+    assert tags == []
+
+
+def test_detect_tags_empty_when_no_holds():
+    """No holds in scene → no tags (conservative)."""
+    from src.wall_scan import detect_tags
+    frame = np.full((600, 600, 3), 110, dtype=np.uint8)
+    frame[200:230, 200:260] = (235, 235, 235)
+    seg = _rect_segment((600, 600), 200, 200, 60, 30)
+    segments = [{"segmentation": seg, "bbox": (200, 200, 60, 30)}]
+    tags = detect_tags(segments, [], frame)
+    assert tags == []
