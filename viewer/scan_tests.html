@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>scan_selection tests</title>
+<style>
+  body { font-family: -apple-system, sans-serif; background: #0b0b0c; color: #fff;
+         padding: 20px; max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 16px; font-weight: 500; margin: 0 0 16px; }
+  .case { padding: 8px 12px; border-radius: 6px; margin-bottom: 4px; font-size: 13px; }
+  .pass { background: rgba(52, 211, 153, 0.15); color: #34d399; }
+  .fail { background: rgba(248, 113, 113, 0.18); color: #fca5a5; }
+  pre { white-space: pre-wrap; margin: 6px 0 0; font-size: 12px; opacity: 0.85; }
+</style>
+</head>
+<body>
+<h1 id="header">scan_selection.js — running…</h1>
+<div id="out"></div>
+<script type="module">
+import {
+  growRoute, assignStartTop, assignStartTopFromTags, assignStartTopSpatial,
+  pointInPolygon
+} from './scan_selection.js';
+
+const cases = [];
+function it(name, fn) { cases.push({name, fn}); }
+function eq(a, b, msg) {
+  const sa = JSON.stringify(a), sb = JSON.stringify(b);
+  if (sa !== sb) throw new Error(`${msg || 'expected equal'}\n  got: ${sa}\n  exp: ${sb}`);
+}
+function ok(x, msg) { if (!x) throw new Error(msg || 'expected truthy'); }
+
+// ── Fixtures ────────────────────────────────────────────────────────────
+const IMG = [1000, 1000];
+function mkHold(id, x, y, lab, neighbors=[]) {
+  return {id, center:[x,y], color_lab:lab, color_hex:'#888888', neighbors,
+          polygon:[[x-5,y-5],[x+5,y-5],[x+5,y+5],[x-5,y+5]], bbox:[x-5,y-5,10,10]};
+}
+
+// 5 holds same colour, neighbours linked left↔right
+const sameColLab = [150, 145, 130];
+const linear = [];
+for (let i = 0; i < 5; i++) {
+  linear.push(mkHold(i, 100 + i * 100, 500, sameColLab));
+}
+linear[0].neighbors = [1, 2];
+linear[1].neighbors = [0, 2, 3];
+linear[2].neighbors = [1, 3, 4, 0];
+linear[3].neighbors = [2, 4, 1];
+linear[4].neighbors = [3, 2];
+
+// Same chain but middle hold is a different colour
+const linearOutlier = linear.map((h, i) =>
+  i === 2 ? {...h, color_lab: [150, 100, 100]} : h);
+
+// Two same-colour holds far apart in space
+const farPair = [
+  mkHold(0, 100, 100, sameColLab, [1]),
+  mkHold(1, 900, 900, sameColLab, [0]),
+];
+
+// Tags fixture: route holds 0..3 vertical, tags at top (near hold 0) and bottom (near hold 3)
+const verticalRoute = [];
+for (let i = 0; i < 4; i++) verticalRoute.push(mkHold(i, 500, 100 + i * 200, sameColLab));
+verticalRoute[0].neighbors = [1]; verticalRoute[1].neighbors = [0,2];
+verticalRoute[2].neighbors = [1,3]; verticalRoute[3].neighbors = [2];
+const twoTags = [
+  {id:0, bbox:[510, 90, 30, 12], center:[525, 95],  nearest_hold_id: 0}, // upper → top
+  {id:1, bbox:[510, 690, 30, 12], center:[525, 695], nearest_hold_id: 3}, // lower → start
+];
+const oneTagBottom = [twoTags[1]];
+
+// ── Cases ──────────────────────────────────────────────────────────────
+it('pointInPolygon hit', () => {
+  ok(pointInPolygon(0.5, 0.5, [[0,0],[1,0],[1,1],[0,1]]));
+});
+it('pointInPolygon miss', () => {
+  ok(!pointInPolygon(2, 2, [[0,0],[1,0],[1,1],[0,1]]));
+});
+
+it('growRoute walks the chain end-to-end', () => {
+  const r = growRoute({anchorId: 2, holds: linear, imageSize: IMG});
+  eq([...r].sort((a,b)=>a-b), [0,1,2,3,4]);
+});
+it('growRoute stops at a colour outlier in the middle', () => {
+  const r = growRoute({anchorId: 0, holds: linearOutlier, imageSize: IMG});
+  eq([...r].sort((a,b)=>a-b), [0, 1]);  // 2 is outlier; 3 and 4 unreachable
+});
+it('growRoute respects MAX_NEIGHBOR_FRAC even with same colour', () => {
+  // 100→900 across a 1000-px image is dSpatial ≈ 1.13 — well over 0.18
+  const r = growRoute({anchorId: 0, holds: farPair, imageSize: IMG});
+  eq([...r], [0]);
+});
+it('growRoute returns just anchor when no neighbours', () => {
+  const lone = [mkHold(0, 500, 500, sameColLab, [])];
+  const r = growRoute({anchorId: 0, holds: lone, imageSize: IMG});
+  eq([...r], [0]);
+});
+
+it('assignStartTop uses two tags: lower=start, upper=top', () => {
+  const out = assignStartTop({routeIds:new Set([0,1,2,3]), tags:twoTags,
+                              holds:verticalRoute, imageSize: IMG});
+  eq(out.source, 'tags');
+  eq(out.startIds, [3]);
+  eq(out.topId, 0);
+});
+it('assignStartTop with single bottom tag → start, top from spatial fallback later', () => {
+  const out = assignStartTop({routeIds:new Set([0,1,2,3]), tags:oneTagBottom,
+                              holds:verticalRoute, imageSize: IMG});
+  eq(out.source, 'tags');
+  eq(out.startIds, [3]);
+  eq(out.topId, null);
+});
+it('assignStartTop falls back to spatial when no tags', () => {
+  const out = assignStartTop({routeIds:new Set([0,1,2,3]), tags:[],
+                              holds:verticalRoute, imageSize: IMG});
+  eq(out.source, 'spatial');
+  eq(out.topId, 0);     // smallest y
+  eq(out.startIds, [3]); // largest y, no double-start
+});
+it('assignStartTop spatial double-start when two low holds are close', () => {
+  // Two low holds at y=900, x=400 and x=600 (Δx=20% width) → both start
+  const holds = [
+    mkHold(0, 500, 100, sameColLab),
+    mkHold(1, 400, 900, sameColLab),
+    mkHold(2, 600, 900, sameColLab),
+  ];
+  const out = assignStartTop({routeIds:new Set([0,1,2]), tags:[],
+                              holds, imageSize: IMG});
+  eq(out.startIds.slice().sort((a,b)=>a-b), [1, 2]);
+});
+
+// ── Runner ─────────────────────────────────────────────────────────────
+const out = document.getElementById('out');
+let pass = 0;
+for (const c of cases) {
+  const div = document.createElement('div');
+  div.className = 'case';
+  try {
+    c.fn();
+    div.classList.add('pass');
+    div.textContent = '✓ ' + c.name;
+    pass++;
+  } catch (e) {
+    div.classList.add('fail');
+    div.textContent = '✗ ' + c.name;
+    const p = document.createElement('pre');
+    p.textContent = e.message;
+    div.appendChild(p);
+  }
+  out.appendChild(div);
+}
+document.getElementById('header').textContent =
+  `scan_selection.js — ${pass}/${cases.length} pass`;
+</script>
+</body>
+</html>

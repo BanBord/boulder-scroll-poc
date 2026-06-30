@@ -115,6 +115,11 @@ def scan_page():
     return send_from_directory("viewer", "scan.html")
 
 
+@app.route("/scan_tests", methods=["GET"])
+def scan_tests_page():
+    return send_from_directory("viewer", "scan_tests.html")
+
+
 @app.route("/scan", methods=["POST"])
 def scan_image():
     """Take an uploaded wall photo, run wall_scan synchronously, write JSON.
