@@ -1,22 +1,22 @@
-"""Wall scan: detect all holds in a single image, group by colour into routes,
-assign start/top within each route.
+"""Wall scan: detect all holds in a single image; emit tags and a routes hint.
 
 Pipeline:
-    image → MobileSAM masks → per-hold Lab colour → single-link cluster
-    in Lab-space → routes → bottom-cluster heuristic for start/top → JSON.
+    image → MobileSAM masks (single pass, points_per_side=48)
+          → hold filter + tag filter (fan-out from same segments)
+          → per-hold Lab colour + kNN neighbours
+          → JSON payload
 
 Output schema (see ``scan()``):
     {
-        "image":      "<path>",
-        "image_size": [W, H],
-        "holds":      [{id, polygon, bbox, center, color_hex, color_lab,
-                        route_id, role}, ...],
-        "routes":     [{id, hex, hold_count, hold_ids, start_hold_ids,
-                        top_hold_id}, ...]
+        "image":       "<path>",
+        "image_size":  [W, H],
+        "holds":       [{id, polygon, bbox, center, color_hex, color_lab,
+                         neighbors}, ...],
+        "tags":        [{id, bbox, center, nearest_hold_id}, ...],
+        "routes_hint": {"count": <int>}
     }
 
-The renderer in ``viewer/scan.html`` reads this JSON; the per-hold ``role``
-field drives the start/top outer ring.
+Start/top selection has moved to the client; ``route_id`` and ``role`` are gone.
 """
 
 import json
@@ -35,10 +35,6 @@ _MIN_HOLDS_PER_ROUTE = 3
 # A hold whose extracted Lab colour has chroma below this value is treated as
 # grey / wall fragment (rejected from any route, kept as noise).
 _MIN_CHROMA = 14.0
-
-# Start/top heuristic windows
-_DOUBLE_START_Y_FRAC = 0.12   # 2nd start hold must be within 12 % of image height
-_DOUBLE_START_X_FRAC = 0.25   # …and within 25 % of image width horizontally
 
 
 # ── Per-hold colour ─────────────────────────────────────────────────────────
@@ -96,70 +92,6 @@ def extract_hold_color(frame_bgr: np.ndarray, mask: np.ndarray,
     a = float(np.median(pixels[:, 1]))
     b = float(np.median(pixels[:, 2]))
     return (L, a, b)
-
-
-# ── Colour clustering → routes ─────────────────────────────────────────────
-
-def _lab_dist(p: Tuple[float, float, float], q: Tuple[float, float, float]) -> float:
-    dl = p[0] - q[0]; da = p[1] - q[1]; db = p[2] - q[2]
-    return float(np.sqrt(dl * dl + da * da + db * db))
-
-
-def cluster_routes(holds: List[Dict], *, eps: float = _LAB_CLUSTER_EPS,
-                   min_samples: int = _MIN_HOLDS_PER_ROUTE) -> List[Dict]:
-    """Greedy single-link clustering of holds by Lab colour.
-
-    Each hold dict must carry ``color_lab``. Routes shorter than
-    ``min_samples`` are dropped (their holds keep ``route_id = None``).
-
-    Returns a list of route dicts: ``{id, lab_center, hex, hold_ids}``.
-    Routes are numbered 0..N in descending size order so route 0 is the
-    largest cluster (visually the most prominent route on the wall).
-    """
-    proto: List[Dict] = []  # each: {lab_sum, count, hold_ids}
-    for h in holds:
-        lab = h["color_lab"]
-        best_idx = -1
-        best_d = eps
-        for i, c in enumerate(proto):
-            center = (c["lab_sum"][0] / c["count"],
-                      c["lab_sum"][1] / c["count"],
-                      c["lab_sum"][2] / c["count"])
-            d = _lab_dist(lab, center)
-            if d < best_d:
-                best_d = d
-                best_idx = i
-        if best_idx >= 0:
-            c = proto[best_idx]
-            c["lab_sum"] = (c["lab_sum"][0] + lab[0],
-                            c["lab_sum"][1] + lab[1],
-                            c["lab_sum"][2] + lab[2])
-            c["count"] += 1
-            c["hold_ids"].append(h["id"])
-        else:
-            proto.append({
-                "lab_sum":  (lab[0], lab[1], lab[2]),
-                "count":    1,
-                "hold_ids": [h["id"]],
-            })
-
-    routes = []
-    for c in proto:
-        if c["count"] < min_samples:
-            continue
-        lab_center = (c["lab_sum"][0] / c["count"],
-                      c["lab_sum"][1] / c["count"],
-                      c["lab_sum"][2] / c["count"])
-        routes.append({
-            "lab_center": lab_center,
-            "hex":        _lab_to_hex(lab_center),
-            "hold_ids":   list(c["hold_ids"]),
-        })
-
-    routes.sort(key=lambda r: -len(r["hold_ids"]))
-    for i, r in enumerate(routes):
-        r["id"] = i
-    return routes
 
 
 def _chroma(lab) -> float:
@@ -298,70 +230,29 @@ def _lab_to_hex(lab: Tuple[float, float, float]) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
-# ── Start/Top heuristic ────────────────────────────────────────────────────
+# ── Module-level constants for the new pipeline ───────────────────────────
 
-def assign_start_top(route_holds: List[Dict], image_h: int, image_w: int
-                     ) -> Tuple[List[int], Optional[int]]:
-    """Bottom-cluster heuristic for start, single-top heuristic for top.
-
-    Inputs are the hold dicts that belong to one route (must carry ``center``
-    and ``id``). Returns ``(start_hold_ids, top_hold_id)``:
-
-    - top: hold with the smallest y (highest position on the wall)
-    - start: hold with the largest y; if a second hold lies within
-      ``_DOUBLE_START_Y_FRAC * image_h`` vertically AND within
-      ``_DOUBLE_START_X_FRAC * image_w`` horizontally, it joins as a
-      second start (two-hand start).
-    - 1-hold route: returns ``([id], id)`` — same hold is both.
-    """
-    if not route_holds:
-        return [], None
-
-    if len(route_holds) == 1:
-        only = int(route_holds[0]["id"])
-        return [only], only
-
-    sorted_by_y = sorted(route_holds, key=lambda h: h["center"][1])
-    top_id = int(sorted_by_y[0]["id"])
-
-    by_y_desc = list(reversed(sorted_by_y))
-    bottom = by_y_desc[0]
-    starts = [int(bottom["id"])]
-    by, bx = bottom["center"][1], bottom["center"][0]
-    dy_max = _DOUBLE_START_Y_FRAC * image_h
-    dx_max = _DOUBLE_START_X_FRAC * image_w
-    for h in by_y_desc[1:]:
-        cy, cx = h["center"][1], h["center"][0]
-        if (by - cy) <= dy_max and abs(cx - bx) <= dx_max:
-            starts.append(int(h["id"]))
-            break
-
-    return starts, top_id
+_SAM_POINTS_PER_SIDE = 48
+_ROUTES_HINT_LAB_EPS = _LAB_CLUSTER_EPS  # keep advisory cluster identical to before
+_ROUTES_HINT_MIN_HOLDS = _MIN_HOLDS_PER_ROUTE
 
 
 # ── Orchestrator ───────────────────────────────────────────────────────────
 
-def scan(image_path: str, *,
-         mat_zone_frac: float = 1.0,
-         lab_eps: float = _LAB_CLUSTER_EPS,
-         min_holds_per_route: int = _MIN_HOLDS_PER_ROUTE) -> Dict:
-    """Run the full scan on a single image and return the wall_scan dict.
+def assemble_scan_payload(*, image_path: str, image_size: Tuple[int, int],
+                          holds_internal: List[Dict],
+                          tags: List[Dict],
+                          per_hold_color_lab: List[Tuple[float, float, float]],
+                          neighbors: List[List[int]],
+                          routes_hint_count: int) -> Dict:
+    """Build the wall_scan JSON dict.
 
-    ``mat_zone_frac`` defaults to 1.0 (no mat exclusion) because the scan use
-    case explicitly cares about the start holds near the floor.
+    Pure function: takes already-extracted features, returns the payload.
+    Drops the internal ``mask`` field; emits exactly the spec's schema.
     """
-    from .hold_detector import detect_holds  # lazy: SAM import is slow
-
-    frame = cv2.imread(image_path)
-    if frame is None:
-        raise RuntimeError(f"cannot read image: {image_path}")
-    h_img, w_img = frame.shape[:2]
-
-    holds = detect_holds(frame, color_filter=None, mat_zone_frac=mat_zone_frac)
-
+    w_img, h_img = image_size
     holds_out = []
-    for h in holds:
-        lab = extract_hold_color(frame, h["mask"])
+    for h, lab, nb in zip(holds_internal, per_hold_color_lab, neighbors):
         holds_out.append({
             "id":        int(h["id"]),
             "polygon":   [[float(x), float(y)] for x, y in h["polygon"]],
@@ -369,47 +260,48 @@ def scan(image_path: str, *,
             "center":    [float(h["center"][0]), float(h["center"][1])],
             "color_hex": _lab_to_hex(lab),
             "color_lab": [round(lab[0], 1), round(lab[1], 1), round(lab[2], 1)],
-            "route_id":  None,
-            "role":      "mid",
+            "neighbors": [int(j) for j in nb],
         })
-
-    # Drop achromatic holds before clustering — they pollute every route by
-    # binding loosely to whichever cluster they're closest to in Lab space.
-    chromatic = [h for h in holds_out if _chroma(h["color_lab"]) >= _MIN_CHROMA]
-    holds_for_cluster = [{"id": h["id"], "color_lab": tuple(h["color_lab"])} for h in chromatic]
-    routes_raw = cluster_routes(holds_for_cluster, eps=lab_eps,
-                                min_samples=min_holds_per_route)
-
-    by_id = {h["id"]: h for h in holds_out}
-    routes_out = []
-    for r in routes_raw:
-        route_holds = [by_id[hid] for hid in r["hold_ids"]]
-        starts, top = assign_start_top(route_holds, h_img, w_img)
-        for hid in r["hold_ids"]:
-            by_id[hid]["route_id"] = r["id"]
-            by_id[hid]["role"] = "mid"
-        for sid in starts:
-            by_id[sid]["role"] = "start"
-        if top is not None:
-            if top in starts:
-                by_id[top]["role"] = "start_top"
-            else:
-                by_id[top]["role"] = "top"
-        routes_out.append({
-            "id":              r["id"],
-            "hex":             r["hex"],
-            "hold_count":      len(r["hold_ids"]),
-            "hold_ids":        r["hold_ids"],
-            "start_hold_ids":  starts,
-            "top_hold_id":     top,
-        })
-
     return {
-        "image":      os.path.abspath(image_path),
-        "image_size": [int(w_img), int(h_img)],
-        "holds":      holds_out,
-        "routes":     routes_out,
+        "image":       image_path,
+        "image_size":  [int(w_img), int(h_img)],
+        "holds":       holds_out,
+        "tags":        tags,
+        "routes_hint": {"count": int(routes_hint_count)},
     }
+
+
+def scan(image_path: str, *, mat_zone_frac: float = 1.0,
+         points_per_side: int = _SAM_POINTS_PER_SIDE) -> Dict:
+    """Run the full wall scan on a single image."""
+    from .hold_detector import run_sam_segments, filter_as_holds
+
+    frame = cv2.imread(image_path)
+    if frame is None:
+        raise RuntimeError(f"cannot read image: {image_path}")
+    h_img, w_img = frame.shape[:2]
+
+    segments = run_sam_segments(frame, points_per_side=points_per_side)
+    holds = filter_as_holds(segments, frame, color_filter=None,
+                            mat_zone_frac=mat_zone_frac)
+    tags  = detect_tags(segments, holds, frame)
+    print(f"Holds: {len(holds)}  Tags: {len(tags)}")
+
+    per_hold_lab = [extract_hold_color(frame, h["mask"]) for h in holds]
+    chromatic_count = sum(1 for lab in per_hold_lab if _chroma(lab) >= _MIN_CHROMA)
+    routes_hint_count = max(1, chromatic_count // _ROUTES_HINT_MIN_HOLDS)
+
+    neighbors = compute_hold_neighbors(holds, k=8)
+
+    return assemble_scan_payload(
+        image_path=os.path.abspath(image_path),
+        image_size=(w_img, h_img),
+        holds_internal=holds,
+        tags=tags,
+        per_hold_color_lab=per_hold_lab,
+        neighbors=neighbors,
+        routes_hint_count=routes_hint_count,
+    )
 
 
 def write_scan_json(scan_dict: Dict, out_path: str) -> None:
