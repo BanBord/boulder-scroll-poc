@@ -243,48 +243,45 @@ def mask_to_polygon(mask: np.ndarray, eps_frac: float = _POLYGON_EPS_FRAC) -> Li
 
 # ── Main detector ────────────────────────────────────────────────────────────
 
-def detect_holds(reference_frame: np.ndarray, color_filter: Optional[str] = None,
-                 mat_zone_frac: float = _MAT_ZONE_FRAC) -> List[Dict]:
-    """SAM-based hold detector, optionally restricted by colour.
+def run_sam_segments(frame_bgr: np.ndarray, points_per_side: int = 32) -> List[Dict]:
+    """Run MobileSAM's AutomaticMaskGenerator on a frame, return raw segments.
 
-    color_filter: None (default) → accept every SAM segment that passes the
-    size + shape sanity filter. "green" → keep only green segments (legacy
-    willtopia behaviour) and run an HSV fallback pass.
-
-    mat_zone_frac: y-fraction below which segments are rejected as floor/mat.
-    Default 0.92 suits climbing-video framing; raise to 1.0 to include the
-    bottom of the frame (useful when scanning a wall photo where the start
-    holds sit near the floor).
-
-    Returns: List[{id, mask, polygon, center, bbox, source}].
-      mask:    H×W bool array
-      polygon: list of (x, y) outer contour points, simplified
+    Each returned dict has at least:
+      - "segmentation": H×W bool array
+      - "bbox":         [x, y, w, h] in pixel coords
     """
     from mobile_sam import sam_model_registry, SamAutomaticMaskGenerator
-
-    h_img, w_img = reference_frame.shape[:2]
-    frame_area = h_img * w_img
-    frame_hsv = cv2.cvtColor(reference_frame, cv2.COLOR_BGR2HSV)
-
     checkpoint = _get_checkpoint()
     sam = sam_model_registry["vit_t"](checkpoint=checkpoint)
     sam.eval()
-
     generator = SamAutomaticMaskGenerator(
         sam,
-        points_per_side=32,
+        points_per_side=points_per_side,
         pred_iou_thresh=0.82,
         stability_score_thresh=0.88,
         min_mask_region_area=_MIN_AREA,
     )
+    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    print(f"SAM: segmenting frame (points_per_side={points_per_side}) …")
+    segs = generator.generate(rgb)
+    print(f"SAM: {len(segs)} total segments")
+    return segs
 
-    frame_rgb = cv2.cvtColor(reference_frame, cv2.COLOR_BGR2RGB)
-    print("SAM: segmenting reference frame…")
-    all_masks = generator.generate(frame_rgb)
-    print(f"SAM: {len(all_masks)} total segments")
+
+def filter_as_holds(segments: List[Dict], frame_bgr: np.ndarray,
+                    color_filter: Optional[str] = None,
+                    mat_zone_frac: float = _MAT_ZONE_FRAC) -> List[Dict]:
+    """Apply the climbing-hold filter chain to raw SAM segments.
+
+    Returns hold dicts in the existing format: {id, mask, polygon, center,
+    bbox, source}. IDs are reassigned top-to-bottom.
+    """
+    h_img, w_img = frame_bgr.shape[:2]
+    frame_area = h_img * w_img
+    frame_hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
 
     sam_holds = []
-    for m in all_masks:
+    for m in segments:
         seg = m["segmentation"].astype(bool)
         area = int(seg.sum())
         if area < _MIN_AREA or area > frame_area * _MAX_AREA_FRAC:
@@ -307,28 +304,29 @@ def detect_holds(reference_frame: np.ndarray, color_filter: Optional[str] = None
             "source":  "sam",
         })
 
-    print(f"SAM holds after filters: {len(sam_holds)}")
-
-    # HSV fallback only runs when colour-restricted.
     if color_filter:
-        candidates = _color_holds(reference_frame, frame_area, color_filter,
+        candidates = _color_holds(frame_bgr, frame_area, color_filter,
                                   mat_zone_frac=mat_zone_frac)
-        print(f"{color_filter.upper()} HSV candidates: {len(candidates)}")
-        added = 0
         for hc in candidates:
             covered = any(_iou(hc["mask"], sh["mask"]) >= _IOU_MERGE for sh in sam_holds)
             if not covered:
                 sam_holds.append(hc)
-                added += 1
-        print(f"HSV added {added} extra holds")
 
-    # Assign sequential IDs sorted top→bottom.
     sam_holds.sort(key=lambda h: h["center"][1])
     for i, h in enumerate(sam_holds):
         h["id"] = i
-
-    print(f"Total holds detected: {len(sam_holds)}")
     return sam_holds
+
+
+def detect_holds(reference_frame: np.ndarray, color_filter: Optional[str] = None,
+                 mat_zone_frac: float = _MAT_ZONE_FRAC) -> List[Dict]:
+    """SAM-based hold detector — backward-compatible wrapper."""
+    segments = run_sam_segments(reference_frame)
+    holds = filter_as_holds(segments, reference_frame,
+                            color_filter=color_filter,
+                            mat_zone_frac=mat_zone_frac)
+    print(f"Total holds detected: {len(holds)}")
+    return holds
 
 
 # ── Debug CLI ────────────────────────────────────────────────────────────────

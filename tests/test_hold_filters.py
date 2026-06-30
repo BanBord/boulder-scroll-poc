@@ -111,3 +111,15 @@ def test_mask_to_polygon_picks_largest_contour():
     cy = sum(p[1] for p in poly) / len(poly)
     # Centroid should sit near the large disk, not the stray
     assert abs(cx - 150) < 5 and abs(cy - 150) < 5
+
+
+def test_filter_as_holds_drops_oversize_segment():
+    """filter_as_holds should reject a SAM segment that fails the size cap."""
+    from src.hold_detector import filter_as_holds
+    # 100×100 frame, one segment covering the whole left half — radius too large
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    seg = np.zeros((100, 100), dtype=bool)
+    seg[:, :50] = True
+    segments = [{"segmentation": seg, "bbox": [0, 0, 50, 100]}]
+    out = filter_as_holds(segments, frame)
+    assert out == []
