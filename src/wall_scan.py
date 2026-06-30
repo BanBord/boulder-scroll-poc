@@ -233,7 +233,6 @@ def _lab_to_hex(lab: Tuple[float, float, float]) -> str:
 # ── Module-level constants for the new pipeline ───────────────────────────
 
 _SAM_POINTS_PER_SIDE = 48
-_ROUTES_HINT_LAB_EPS = _LAB_CLUSTER_EPS  # keep advisory cluster identical to before
 _ROUTES_HINT_MIN_HOLDS = _MIN_HOLDS_PER_ROUTE
 
 
