@@ -82,14 +82,31 @@ def run(
     # --- Hold detection (optional, runs once on reference frame) ---
     holds = []
     if track_holds:
-        from .hold_detector import detect_holds
+        from .hold_detector import detect_holds, pick_clean_frame
         from .contact import check_contacts
-        # Use first clean frame (t=1s) as reference — wall without climber
-        cap.set(cv2.CAP_PROP_POS_FRAMES, int(fps))
-        _, ref_frame = cap.read()
-        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        from .grab_clusters import build_trajectory_prior, filter_holds_by_clusters, hold_match_distance
+
+        print("[track_holds] pass 1/2: collecting hand trajectory…")
+        traj_max = int(max_seconds * fps) if max_seconds else None
+        clusters, raw_pts = build_trajectory_prior(
+            cap, detector, frame_w=src_w, stride=3, max_frames=traj_max,
+        )
+        print(f"[track_holds] {len(raw_pts)} wrist observations → {len(clusters)} grab clusters")
+
+        ref_frame = pick_clean_frame(cap, detector=detector)
         if ref_frame is not None:
-            holds = detect_holds(ref_frame)
+            all_holds = detect_holds(ref_frame)
+            if clusters:
+                holds = filter_holds_by_clusters(all_holds, clusters,
+                                                 max_dist=hold_match_distance(src_w))
+                # Reassign sequential ids on filtered set so timeline stays compact
+                holds.sort(key=lambda h: h["center"][1])
+                for i, h in enumerate(holds):
+                    h["id"] = i
+                print(f"[track_holds] trajectory prior: {len(all_holds)} → {len(holds)} holds")
+            else:
+                holds = all_holds
+                print("[track_holds] no grab clusters — falling back to full hold set")
         timeline_frames = []
 
     # --- Calibration pass ---
@@ -229,9 +246,21 @@ def run(
         timeline_path = os.path.splitext(output_path)[0] + "_timeline.json"
         timeline = {
             "fps": fps,
+            "video_size": [src_w, src_h],
             "holds": [{"id": h["id"], "center": list(h["center"]), "bbox": list(h["bbox"])} for h in holds],
             "frames": timeline_frames,
         }
         with open(timeline_path, "w") as f:
             json.dump(timeline, f)
         print(f"Timeline → {timeline_path}")
+
+        from .route_aggregator import aggregate
+        try:
+            route_path = aggregate(timeline_path)
+            with open(route_path) as rf:
+                route_json = json.load(rf)
+            print(f"[route] start=h{route_json.get('start_hold_id')} "
+                  f"top=h{route_json.get('top_hold_id')} "
+                  f"route_holds={len(route_json.get('holds', []))} → {route_path}")
+        except RuntimeError as e:
+            print(f"[route] aggregation skipped: {e}")
