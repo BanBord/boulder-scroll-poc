@@ -226,13 +226,21 @@ body { min-height: 100vh; min-height: 100svh; display: flex; justify-content: ce
 
 </div>
 
-<script>
-(() => {
+<script type="module">
+import {
+  growRoute, assignStartTop, pointInPolygon
+} from './scan_selection.js';
+
   // ── State ────────────────────────────────────────────────────────────────
   const state = {
-    scan: null,          // wall_scan JSON
-    mode: 'all',         // 'all' | 'route'
-    selectedRouteId: null,
+    scan: null,
+    mode: 'all',            // 'all' | 'route' | 'edit'
+    selectedRouteIds: null, // Set<id>
+    anchorId: null,
+    startIds: [],
+    topId: null,
+    source: null,           // 'tags' | 'spatial'
+    editMode: false,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -265,8 +273,7 @@ body { min-height: 100vh; min-height: 100svh; display: flex; justify-content: ce
       $('scan-view').classList.add('active');
       resizeCanvas();
       buildDots();
-      render();
-      setSheetAll();
+      enterAllMode();
     } catch (err) {
       status.textContent = 'Error: ' + err.message;
       label.style.display = 'inline-flex';
@@ -274,7 +281,7 @@ body { min-height: 100vh; min-height: 100svh; display: flex; justify-content: ce
   });
 
   $('btn-back').addEventListener('click', () => {
-    if (state.mode === 'route') { setMode('all'); }
+    if (state.mode === 'route') { enterAllMode(); }
     else { window.location.reload(); }
   });
   $('btn-rescan').addEventListener('click', () => window.location.reload());
@@ -315,22 +322,17 @@ body { min-height: 100vh; min-height: 100svh; display: flex; justify-content: ce
     if (!state.scan) return;
     const rect = wallImg.getBoundingClientRect();
     ctx.clearRect(0, 0, rect.width, rect.height);
-
-    const activeRouteId = state.selectedRouteId;
-    const isRouteMode   = state.mode === 'route';
-
-    // Pass 1: dim/background strokes — draw first so active holds sit on top
+    const inRoute = state.selectedRouteIds || new Set();
     for (const h of state.scan.holds) {
-      if (isRouteMode && h.route_id === activeRouteId) continue;
-      drawHold(h, /*active*/ false);
+      if (state.mode === 'route' && inRoute.has(h.id)) continue;
+      drawHold(h, false);
     }
-    // Pass 2: active holds
     for (const h of state.scan.holds) {
-      if (isRouteMode && h.route_id !== activeRouteId) continue;
-      if (!isRouteMode) {
-        drawHold(h, /*active*/ true);
+      if (state.mode === 'route') {
+        if (!inRoute.has(h.id)) continue;
+        drawHold(h, true);
       } else {
-        drawHold(h, /*active*/ true);
+        drawHold(h, true);
       }
     }
   }
@@ -364,12 +366,9 @@ body { min-height: 100vh; min-height: 100svh; display: flex; justify-content: ce
   function drawHold(h, active) {
     if (!h.polygon || h.polygon.length < 3) return;
     const isRouteMode = state.mode === 'route';
-    const route       = h.route_id != null
-      ? state.scan.routes.find(r => r.id === h.route_id) : null;
 
     ctx.save();
     if (!isRouteMode) {
-      // "all" mode — every hold gets a white glow stroke
       pathPolygon(h.polygon);
       ctx.fillStyle   = 'rgba(255, 255, 255, 0.05)';
       ctx.fill();
@@ -379,37 +378,24 @@ body { min-height: 100vh; min-height: 100svh; display: flex; justify-content: ce
       ctx.lineWidth   = 2;
       ctx.stroke();
       ctx.restore();
-      // Subtle role hint
-      if (h.role === 'start')  outerRing(h, 5, 'rgba(52,211,153,0.5)',  1.5, 0);
-      if (h.role === 'top')    outerRing(h, 5, 'rgba(248,113,113,0.5)', 1.5, 0);
-      if (h.role === 'start_top') {
-        outerRing(h, 5, 'rgba(52,211,153,0.5)',  1.5, 0);
-        outerRing(h, 8, 'rgba(248,113,113,0.5)', 1.5, 0);
-      }
       return;
     }
 
-    // "route" mode
-    if (active && route) {
-      // Active hold: filled in route colour, white glow, route hex stroke
+    if (active) {
+      const anchor = state.scan.holds.find(x => x.id === state.anchorId);
+      const hex = anchor ? anchor.color_hex : '#ffffff';
       pathPolygon(h.polygon);
-      ctx.fillStyle = hexA(route.hex, 0.35);
+      ctx.fillStyle = hexA(hex, 0.35);
       ctx.fill();
       ctx.shadowColor = '#ffffff';
       ctx.shadowBlur  = 16;
-      ctx.strokeStyle = route.hex;
+      ctx.strokeStyle = hex;
       ctx.lineWidth   = 2.5;
       ctx.stroke();
       ctx.restore();
-
-      if (h.role === 'start')  outerRing(h, 6, '#34d399', 3, 10);
-      else if (h.role === 'top') outerRing(h, 6, '#f87171', 3, 10);
-      else if (h.role === 'start_top') {
-        outerRing(h, 6, '#34d399', 3, 10);
-        outerRing(h, 10, '#f87171', 3, 10);
-      }
+      if (state.startIds.includes(h.id)) outerRing(h, 6, '#34d399', 3, 10);
+      else if (h.id === state.topId)     outerRing(h, 6, '#f87171', 3, 10);
     } else {
-      // Dimmed background hold
       pathPolygon(h.polygon);
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
       ctx.lineWidth   = 1;
@@ -426,17 +412,6 @@ body { min-height: 100vh; min-height: 100svh; display: flex; justify-content: ce
   }
 
   // ── Hit testing ──────────────────────────────────────────────────────────
-  function pointInPolygon(x, y, poly) {
-    let inside = false;
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-      const [xi, yi] = poly[i], [xj, yj] = poly[j];
-      const intersect = ((yi > y) !== (yj > y)) &&
-        (x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi);
-      if (intersect) inside = !inside;
-    }
-    return inside;
-  }
-
   function holdAt(displayX, displayY) {
     // Convert display coords → image coords using inverse cover transform.
     const { scale, offX, offY } = scaling();
@@ -452,19 +427,60 @@ body { min-height: 100vh; min-height: 100svh; display: flex; justify-content: ce
   canvas.addEventListener('click', (e) => {
     const rect = canvas.getBoundingClientRect();
     const h = holdAt(e.clientX - rect.left, e.clientY - rect.top);
-    if (h && h.route_id != null) {
-      setMode('route', h.route_id);
+
+    if (state.editMode) {
+      if (!h || state.selectedRouteIds === null) return;
+      toggleHoldInRoute(h.id);
+      return;
+    }
+
+    if (h) {
+      selectRouteFromAnchor(h.id);
     } else if (state.mode === 'route') {
-      setMode('all');
+      enterAllMode();
     }
   });
+
+  function selectRouteFromAnchor(anchorId) {
+    const routeIds = growRoute({
+      anchorId,
+      holds: state.scan.holds,
+      imageSize: state.scan.image_size,
+    });
+    const {startIds, topId, source} = assignStartTop({
+      routeIds,
+      tags: state.scan.tags,
+      holds: state.scan.holds,
+      imageSize: state.scan.image_size,
+    });
+    state.mode = 'route';
+    state.anchorId = anchorId;
+    state.selectedRouteIds = routeIds;
+    state.startIds = startIds || [];
+    state.topId = topId;
+    state.source = source;
+    render();
+    updateDots();
+    setSheetRoute();
+  }
+
+  function enterAllMode() {
+    state.mode = 'all';
+    state.anchorId = null;
+    state.selectedRouteIds = null;
+    state.startIds = [];
+    state.topId = null;
+    state.source = null;
+    render();
+    updateDots();
+    setSheetAll();
+  }
 
   canvas.addEventListener('mousemove', (e) => {
     const rect = canvas.getBoundingClientRect();
     const h = holdAt(e.clientX - rect.left, e.clientY - rect.top);
     if (h) {
-      tooltip.textContent = `Hold #${h.id} · ${h.role}` +
-        (h.route_id != null ? ` · route #${h.route_id + 1}` : ' · noise');
+      tooltip.textContent = `Hold #${h.id}`;
       tooltip.style.left = (e.clientX - rect.left + 12) + 'px';
       tooltip.style.top  = (e.clientY - rect.top  + 12) + 'px';
       tooltip.classList.add('visible');
@@ -474,58 +490,59 @@ body { min-height: 100vh; min-height: 100svh; display: flex; justify-content: ce
   });
   canvas.addEventListener('mouseleave', () => tooltip.classList.remove('visible'));
 
-  // ── Mode + sheet ─────────────────────────────────────────────────────────
-  function setMode(mode, routeId = null) {
-    state.mode = mode;
-    state.selectedRouteId = routeId;
-    render();
-    updateDots();
-    if (mode === 'all') setSheetAll();
-    else                setSheetRoute(routeId);
-  }
-
+  // ── Sheet functions ───────────────────────────────────────────────────────
   function setSheetAll() {
-    const n = state.scan.routes.length;
-    $('sheet-content').innerHTML = `
-      <h2>${n} route${n === 1 ? '' : 's'} detected</h2>
+    const n = state.scan.routes_hint?.count ?? 0;
+    document.getElementById('sheet-content').innerHTML = `
+      <h2>≈ ${n} route${n === 1 ? '' : 's'}</h2>
       <hr>
       <div class="hero">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M6 14c1-4 11-4 12 0"/><circle cx="12" cy="9" r="3"/>
         </svg>
-        <p>Tap a hold to select a route</p>
-        <small>Any hold in a route works</small>
-      </div>
-    `;
+        <p>Tap a hold to select its route</p>
+        <small>Any hold works — colour groups expand from where you tap</small>
+      </div>`;
   }
 
-  function setSheetRoute(routeId) {
-    const route = state.scan.routes.find(r => r.id === routeId);
-    if (!route) return;
-    $('sheet-content').innerHTML = `
+  function setSheetRoute() {
+    const ids = state.selectedRouteIds;
+    if (!ids) return;
+    const n = ids.size;
+    const sourceBadge = state.source === 'tags' ? '· tags' : '· auto';
+    document.getElementById('sheet-content').innerHTML = `
       <div class="row">
-        <h2>Route #${routeId + 1}</h2>
-        <button class="pencil" title="Edit (Phase 1.5)">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <h2>Route</h2>
+        <button class="pencil" id="btn-pencil" title="Edit holds in this route">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
           </svg>
         </button>
       </div>
-      <p class="sub">${route.hold_count} holds detected</p>
+      <p class="sub">${n} holds · start/top from ${state.source} ${sourceBadge}</p>
       <hr>
       <button class="add-grade">Add grade</button>
       <button class="cta">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+        </svg>
         Start Sending!
-      </button>
-    `;
+      </button>`;
+    document.getElementById('btn-pencil').addEventListener('click', togglePencil);
   }
+
+  function togglePencil()         { /* Task 10 */ }
+  function toggleHoldInRoute(_id) { /* Task 10 */ }
 
   function buildDots() {
     const dots = $('dots');
     dots.innerHTML = '';
-    for (let i = 0; i < state.scan.routes.length; i++) {
+    const n = state.scan.routes_hint?.count ?? 0;
+    for (let i = 0; i < n; i++) {
       const d = document.createElement('div');
       d.className = 'dot';
       dots.appendChild(d);
@@ -535,10 +552,9 @@ body { min-height: 100vh; min-height: 100svh; display: flex; justify-content: ce
   function updateDots() {
     const els = $('dots').children;
     for (let i = 0; i < els.length; i++) {
-      els[i].classList.toggle('active', state.mode === 'route' && state.selectedRouteId === i);
+      els[i].classList.toggle('active', state.mode === 'route' && i === 0);
     }
   }
-})();
 </script>
 
 </body>
