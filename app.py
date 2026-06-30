@@ -154,8 +154,9 @@ def scan_image():
         "image_url": scan_dict["image"],
         "json_url":  f"/scan_json/{scan_id}",
         "summary":   {
-            "holds":  len(scan_dict["holds"]),
-            "routes": len(scan_dict["routes"]),
+            "holds":       len(scan_dict["holds"]),
+            "tags":        len(scan_dict["tags"]),
+            "routes_hint": scan_dict["routes_hint"]["count"],
         },
     })
 
