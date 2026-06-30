@@ -312,38 +312,29 @@ def write_scan_json(scan_dict: Dict, out_path: str) -> None:
 # ── Debug overlay ──────────────────────────────────────────────────────────
 
 def draw_overlay(frame_bgr: np.ndarray, scan_dict: Dict) -> np.ndarray:
-    """Return a copy of the frame with all holds drawn in their route colours.
+    """Draw all hold polygons in their per-hold colour, plus tag rectangles.
 
-    Used by ``tools/scan_wall.py`` for a quick visual sanity check without
-    spinning up the viewer.
+    No route grouping at this stage — colour-clustering is now the client's
+    job. The overlay shows raw detection quality only.
     """
     out = frame_bgr.copy()
     h_img, w_img = frame_bgr.shape[:2]
     line_thickness = max(2, int(round(min(w_img, h_img) / 400)))
-    ring_radius    = max(14, int(round(min(w_img, h_img) / 80)))
-    ring_thickness = max(2, int(round(line_thickness * 1.5)))
-    routes_by_id = {r["id"]: r for r in scan_dict["routes"]}
+    tag_thickness  = max(2, line_thickness)
+
     for h in scan_dict["holds"]:
         poly = np.array(h["polygon"], dtype=np.int32)
         if len(poly) < 3:
             continue
-        if h["route_id"] is None:
-            color = (200, 200, 200)  # noise: grey
-        else:
-            hex_ = routes_by_id[h["route_id"]]["hex"]
-            color = _hex_to_bgr(hex_)
-        cv2.polylines(out, [poly], isClosed=True, color=color,
+        bgr = _hex_to_bgr(h["color_hex"])
+        cv2.polylines(out, [poly], isClosed=True, color=bgr,
                       thickness=line_thickness, lineType=cv2.LINE_AA)
-        cx, cy = int(h["center"][0]), int(h["center"][1])
-        if h["role"] == "start":
-            cv2.circle(out, (cx, cy), ring_radius, (153, 211, 52),
-                       ring_thickness, lineType=cv2.LINE_AA)
-        elif h["role"] == "top":
-            cv2.circle(out, (cx, cy), ring_radius, (113, 113, 248),
-                       ring_thickness, lineType=cv2.LINE_AA)
-        elif h["role"] == "start_top":
-            cv2.circle(out, (cx, cy), ring_radius, (160, 160, 248),
-                       ring_thickness, lineType=cv2.LINE_AA)
+
+    for t in scan_dict["tags"]:
+        x, y, w, hh = t["bbox"]
+        cv2.rectangle(out, (x, y), (x + w, y + hh),
+                      (0, 220, 255), tag_thickness, lineType=cv2.LINE_AA)
+
     return out
 
 
