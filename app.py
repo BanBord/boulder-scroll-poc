@@ -108,6 +108,64 @@ def serve_balance(filename):
     return send_from_directory(OUTPUT_DIR, filename, mimetype="application/json")
 
 
+# ── Wall-Scan ──────────────────────────────────────────────────────────────
+
+@app.route("/scan", methods=["GET"])
+def scan_page():
+    return send_from_directory("viewer", "scan.html")
+
+
+@app.route("/scan", methods=["POST"])
+def scan_image():
+    """Take an uploaded wall photo, run wall_scan synchronously, write JSON.
+
+    Returns ``{scan_id, image_url, json_url}``. The synchronous path keeps the
+    Phase-1 flow simple — MobileSAM on a phone-sized photo is ~10 s, fine for
+    a single button-click.
+    """
+    img_file = request.files.get("image")
+    if img_file is None:
+        return jsonify({"error": "no image uploaded"}), 400
+
+    scan_id = uuid.uuid4().hex[:8]
+    ext = os.path.splitext(img_file.filename)[1].lower() or ".jpg"
+    if ext not in (".jpg", ".jpeg", ".png"):
+        return jsonify({"error": f"unsupported image type: {ext}"}), 400
+    image_path = os.path.join(UPLOAD_DIR, f"{scan_id}_wall{ext}")
+    img_file.save(image_path)
+
+    try:
+        from src.wall_scan import scan, write_scan_json
+        scan_dict = scan(image_path)
+        json_path = os.path.join(OUTPUT_DIR, f"{scan_id}_scan.json")
+        # Rewrite image path to a server-relative URL so the viewer can find it.
+        scan_dict["image"] = f"/uploads/{os.path.basename(image_path)}"
+        write_scan_json(scan_dict, json_path)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    return jsonify({
+        "scan_id":   scan_id,
+        "image_url": scan_dict["image"],
+        "json_url":  f"/scan_json/{scan_id}",
+        "summary":   {
+            "holds":  len(scan_dict["holds"]),
+            "routes": len(scan_dict["routes"]),
+        },
+    })
+
+
+@app.route("/scan_json/<scan_id>")
+def serve_scan_json(scan_id):
+    return send_from_directory(OUTPUT_DIR, f"{scan_id}_scan.json",
+                               mimetype="application/json")
+
+
+@app.route("/uploads/<path:filename>")
+def serve_upload(filename):
+    return send_from_directory(UPLOAD_DIR, filename)
+
+
 if __name__ == "__main__":
     print("Boulder Scroll  →  http://localhost:5001")
     app.run(debug=False, threaded=True, port=5001)

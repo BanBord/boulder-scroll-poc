@@ -29,6 +29,11 @@ _IOU_MERGE = 0.3
 # Number of frames sampled when picking a clean reference frame
 _CLEAN_FRAME_SAMPLES = 30
 
+# Polygon simplification: Douglas-Peucker epsilon as fraction of contour perimeter.
+# 0.005 yields ~10–20 points for typical hold contours — close enough to the mask
+# shape to read as the hold's silhouette, sparse enough for sub-millisecond hit tests.
+_POLYGON_EPS_FRAC = 0.005
+
 
 def _get_checkpoint() -> str:
     if os.path.exists(_CHECKPOINT_PATH) and os.path.getsize(_CHECKPOINT_PATH) > 1_000_000:
@@ -113,7 +118,8 @@ def _color_mask(frame_hsv: np.ndarray, color: str) -> Optional[np.ndarray]:
     return mask
 
 
-def _color_holds(frame: np.ndarray, frame_area: int, color: str) -> List[Dict]:
+def _color_holds(frame: np.ndarray, frame_area: int, color: str,
+                 mat_zone_frac: float = _MAT_ZONE_FRAC) -> List[Dict]:
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     binary = _color_mask(hsv, color)
     if binary is None:
@@ -129,7 +135,7 @@ def _color_holds(frame: np.ndarray, frame_area: int, color: str) -> List[Dict]:
         bbox = (int(x), int(y), int(w), int(hh))
         if not _passes_size_cap(bbox, w_img):
             continue
-        if not _passes_mat_zone(bbox, h_img):
+        if not _passes_mat_zone(bbox, h_img, mat_zone_frac):
             continue
         if not _contour_passes_shape(cnt, area):
             continue
@@ -137,8 +143,13 @@ def _color_holds(frame: np.ndarray, frame_area: int, color: str) -> List[Dict]:
         cv2.drawContours(m, [cnt], -1, 255, -1)
         mask = m.astype(bool)
         cx, cy = x + w / 2, y + hh / 2
-        holds.append({"mask": mask, "center": (float(cx), float(cy)),
-                      "bbox": bbox, "source": "hsv"})
+        holds.append({
+            "mask": mask,
+            "center": (float(cx), float(cy)),
+            "bbox": bbox,
+            "polygon": mask_to_polygon(mask),
+            "source": "hsv",
+        })
     return holds
 
 
@@ -198,11 +209,11 @@ def _passes_size_cap(bbox, frame_w: int) -> bool:
     return r <= _MAX_RADIUS_FRAC * frame_w
 
 
-def _passes_mat_zone(bbox, frame_h: int) -> bool:
+def _passes_mat_zone(bbox, frame_h: int, mat_zone_frac: float = _MAT_ZONE_FRAC) -> bool:
     """Reject segments whose centre is below the mat-zone threshold."""
     _, y, _, h = bbox
     cy = float(y) + float(h) / 2.0
-    return cy < _MAT_ZONE_FRAC * frame_h
+    return cy < mat_zone_frac * frame_h
 
 
 def _iou(a: np.ndarray, b: np.ndarray) -> float:
@@ -211,16 +222,43 @@ def _iou(a: np.ndarray, b: np.ndarray) -> float:
     return float(inter) / float(union) if union > 0 else 0.0
 
 
+def mask_to_polygon(mask: np.ndarray, eps_frac: float = _POLYGON_EPS_FRAC) -> List[Tuple[float, float]]:
+    """Extract the outer contour of a binary mask as a simplified polygon.
+
+    Returns a list of (x, y) points in image coordinates. Uses the largest
+    external contour (holds occasionally come with a tiny stray island after
+    morphology). Douglas-Peucker simplification at ``eps_frac * perimeter``.
+    """
+    bin_u8 = (mask.astype(np.uint8) * 255) if mask.dtype != np.uint8 else mask
+    cnts, _ = cv2.findContours(bin_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not cnts:
+        return []
+    cnt = max(cnts, key=cv2.contourArea)
+    perim = cv2.arcLength(cnt, closed=True)
+    if perim <= 0:
+        return []
+    approx = cv2.approxPolyDP(cnt, eps_frac * perim, closed=True)
+    return [(float(p[0][0]), float(p[0][1])) for p in approx]
+
+
 # ── Main detector ────────────────────────────────────────────────────────────
 
-def detect_holds(reference_frame: np.ndarray, color_filter: Optional[str] = None) -> List[Dict]:
+def detect_holds(reference_frame: np.ndarray, color_filter: Optional[str] = None,
+                 mat_zone_frac: float = _MAT_ZONE_FRAC) -> List[Dict]:
     """SAM-based hold detector, optionally restricted by colour.
 
     color_filter: None (default) → accept every SAM segment that passes the
     size + shape sanity filter. "green" → keep only green segments (legacy
     willtopia behaviour) and run an HSV fallback pass.
 
-    Returns: List[{id, mask (H×W bool), center (x,y), bbox, source}].
+    mat_zone_frac: y-fraction below which segments are rejected as floor/mat.
+    Default 0.92 suits climbing-video framing; raise to 1.0 to include the
+    bottom of the frame (useful when scanning a wall photo where the start
+    holds sit near the floor).
+
+    Returns: List[{id, mask, polygon, center, bbox, source}].
+      mask:    H×W bool array
+      polygon: list of (x, y) outer contour points, simplified
     """
     from mobile_sam import sam_model_registry, SamAutomaticMaskGenerator
 
@@ -255,24 +293,26 @@ def detect_holds(reference_frame: np.ndarray, color_filter: Optional[str] = None
         bbox = (int(x), int(y), int(w), int(hh))
         if not _passes_size_cap(bbox, w_img):
             continue
-        if not _passes_mat_zone(bbox, h_img):
+        if not _passes_mat_zone(bbox, h_img, mat_zone_frac):
             continue
         if not _segment_passes_shape(seg, bbox):
             continue
         if color_filter and not _segment_matches_color(seg, frame_hsv, color_filter):
             continue
         sam_holds.append({
-            "mask":   seg,
-            "center": (float(x + w / 2), float(y + hh / 2)),
-            "bbox":   bbox,
-            "source": "sam",
+            "mask":    seg,
+            "center":  (float(x + w / 2), float(y + hh / 2)),
+            "bbox":    bbox,
+            "polygon": mask_to_polygon(seg),
+            "source":  "sam",
         })
 
     print(f"SAM holds after filters: {len(sam_holds)}")
 
     # HSV fallback only runs when colour-restricted.
     if color_filter:
-        candidates = _color_holds(reference_frame, frame_area, color_filter)
+        candidates = _color_holds(reference_frame, frame_area, color_filter,
+                                  mat_zone_frac=mat_zone_frac)
         print(f"{color_filter.upper()} HSV candidates: {len(candidates)}")
         added = 0
         for hc in candidates:

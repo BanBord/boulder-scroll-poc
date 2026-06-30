@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>Climbrr — Scan Routes</title>
+<style>
+:root {
+  --bg: #0b0b0c;
+  --surface: #ffffff;
+  --text-primary: #0f0f10;
+  --text-secondary: #6b7280;
+  --border: rgba(15, 15, 16, 0.08);
+  --chip-bg: rgba(15, 15, 16, 0.88);
+  --start-green: #34d399;
+  --top-red: #f87171;
+  --cta-bg: #0f0f10;
+  --cta-text: #ffffff;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+  overscroll-behavior: none; }
+body { min-height: 100vh; min-height: 100svh; display: flex; justify-content: center; }
+
+.app {
+  width: 100%; max-width: 430px; min-height: 100vh; min-height: 100svh;
+  background: #000; color: #fff; position: relative; overflow: hidden;
+  display: flex; flex-direction: column;
+}
+
+/* ── Upload landing (shown until an image is loaded) ─────────────────────── */
+.upload-landing {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; padding: 40px 24px; gap: 24px; text-align: center;
+}
+.upload-landing h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+.upload-landing p { color: #9ca3af; font-size: 14px; max-width: 280px; line-height: 1.5; margin: 0; }
+.upload-btn {
+  background: #fff; color: #000; border: 0; border-radius: 999px;
+  padding: 14px 28px; font-size: 15px; font-weight: 600; cursor: pointer;
+}
+.upload-btn:disabled { opacity: 0.5; cursor: default; }
+.upload-landing input[type=file] { display: none; }
+.upload-spinner {
+  width: 28px; height: 28px; border: 3px solid rgba(255,255,255,0.2);
+  border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Scan view (shown after scan completes) ───────────────────────────────── */
+.scan-view { display: none; flex: 1; position: relative; }
+.scan-view.active { display: flex; flex-direction: column; }
+
+/* Top bar */
+.top-bar {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 20;
+  padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.55), transparent);
+  pointer-events: none;
+}
+.top-bar > * { pointer-events: auto; }
+.icon-btn {
+  width: 40px; height: 40px; border-radius: 50%;
+  background: rgba(40, 40, 42, 0.85); backdrop-filter: blur(10px);
+  border: 0; color: #fff; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; padding: 0;
+}
+.icon-btn svg { width: 20px; height: 20px; }
+.top-bar .title { font-size: 17px; font-weight: 600; color: #fff; }
+.top-bar .group-right { display: flex; gap: 8px; }
+
+/* Image stage */
+.stage {
+  position: relative; flex: 1; width: 100%;
+  background: #000; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 0;
+}
+.stage img {
+  display: block; width: 100%; height: 100%; object-fit: cover;
+  user-select: none; -webkit-user-drag: none;
+}
+.stage canvas {
+  position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+  pointer-events: auto; touch-action: manipulation;
+}
+
+/* "Scanned" chip */
+.scanned-chip {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+  background: var(--chip-bg); color: #fff;
+  padding: 8px 16px; border-radius: 999px; font-size: 13px; font-weight: 500;
+  display: flex; align-items: center; gap: 6px; z-index: 15;
+  pointer-events: none;
+}
+.scanned-chip svg { width: 14px; height: 14px; }
+
+/* Bottom sheet (static in Phase 1) */
+.sheet {
+  background: var(--surface); color: var(--text-primary);
+  border-top-left-radius: 24px; border-top-right-radius: 24px;
+  padding: 16px 20px 28px; box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.18);
+  z-index: 10; position: relative;
+}
+.sheet .grabber {
+  width: 36px; height: 4px; background: #d1d5db; border-radius: 999px;
+  margin: -4px auto 14px;
+}
+.sheet h2 {
+  font-size: 22px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 4px;
+}
+.sheet .sub {
+  font-size: 13px; color: var(--text-secondary); margin: 0;
+}
+.sheet hr { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
+
+.sheet .hero {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 12px 0 4px;
+}
+.sheet .hero svg { width: 28px; height: 28px; color: var(--text-primary); }
+.sheet .hero p { margin: 0; font-size: 14px; font-weight: 600; }
+.sheet .hero small { color: var(--text-secondary); font-size: 13px; }
+
+.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.add-grade {
+  border: 1px solid var(--border); background: #fafafa;
+  border-radius: 14px; padding: 14px 16px; width: 100%;
+  text-align: left; font-size: 15px; color: var(--text-primary); cursor: pointer;
+  display: flex; align-items: center; gap: 8px;
+}
+.add-grade::before { content: "+"; font-size: 18px; line-height: 1; color: var(--text-secondary); }
+.cta {
+  background: var(--cta-bg); color: var(--cta-text);
+  border: 0; border-radius: 14px; padding: 16px;
+  width: 100%; font-size: 15px; font-weight: 600; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  margin-top: 12px;
+}
+.cta svg { width: 18px; height: 18px; }
+.pencil {
+  background: transparent; border: 0; padding: 6px;
+  color: var(--text-secondary); cursor: pointer;
+}
+.pencil svg { width: 18px; height: 18px; }
+
+.dots {
+  display: flex; gap: 6px; justify-content: center;
+  margin-bottom: 12px; margin-top: -4px;
+}
+.dot { width: 6px; height: 6px; border-radius: 50%; background: #d1d5db; }
+.dot.active { background: var(--text-primary); width: 22px; border-radius: 999px; }
+
+/* Tooltip — image-anchored, used in Phase 1 for debugging */
+.hold-tooltip {
+  position: absolute; pointer-events: none;
+  background: var(--chip-bg); color: #fff;
+  padding: 6px 10px; border-radius: 8px; font-size: 12px;
+  white-space: nowrap; z-index: 25;
+  opacity: 0; transition: opacity 0.12s ease;
+}
+.hold-tooltip.visible { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ── Upload landing ───────────────────────────────────────────────────── -->
+  <section class="upload-landing" id="upload-landing">
+    <h1>Scan a wall</h1>
+    <p>Take a clear photo of the boulder wall. We'll detect every hold and cluster them into routes by colour.</p>
+    <label class="upload-btn" id="upload-label">
+      Choose photo
+      <input type="file" accept="image/*" id="file-input">
+    </label>
+    <div id="upload-status" style="font-size:13px;color:#9ca3af;"></div>
+  </section>
+
+  <!-- ── Scan view ────────────────────────────────────────────────────────── -->
+  <section class="scan-view" id="scan-view">
+
+    <!-- Top bar (static in Phase 1) -->
+    <div class="top-bar">
+      <button class="icon-btn" id="btn-back" title="Back">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <div class="title" id="top-title">Routes</div>
+      <div class="group-right">
+        <button class="icon-btn" id="btn-rescan" title="Rescan">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+            <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+          </svg>
+        </button>
+        <button class="icon-btn" id="btn-flag" title="Flag">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Image + overlay -->
+    <div class="stage" id="stage">
+      <img id="wall" alt="Wall scan">
+      <canvas id="overlay"></canvas>
+      <div class="scanned-chip" id="chip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        Scanned
+      </div>
+      <div class="hold-tooltip" id="tooltip"></div>
+    </div>
+
+    <!-- Bottom sheet (state-driven) -->
+    <div class="sheet">
+      <div class="grabber"></div>
+      <div class="dots" id="dots"></div>
+      <div id="sheet-content"></div>
+    </div>
+
+  </section>
+
+</div>
+
+<script>
+(() => {
+  // ── State ────────────────────────────────────────────────────────────────
+  const state = {
+    scan: null,          // wall_scan JSON
+    mode: 'all',         // 'all' | 'route'
+    selectedRouteId: null,
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const stage   = $('stage');
+  const wallImg = $('wall');
+  const canvas  = $('overlay');
+  const ctx     = canvas.getContext('2d');
+  const tooltip = $('tooltip');
+
+  // ── Upload flow ──────────────────────────────────────────────────────────
+  $('file-input').addEventListener('change', async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const label  = $('upload-label');
+    const status = $('upload-status');
+    label.style.display = 'none';
+    status.innerHTML = '<div class="upload-spinner"></div><div style="margin-top:10px">Scanning…</div>';
+
+    const fd = new FormData();
+    fd.append('image', f);
+    try {
+      const resp = await fetch('/scan', { method: 'POST', body: fd });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'scan failed');
+      wallImg.src = data.image_url;
+      await new Promise(r => wallImg.onload = r);
+      const scanResp = await fetch(data.json_url);
+      state.scan = await scanResp.json();
+      $('upload-landing').style.display = 'none';
+      $('scan-view').classList.add('active');
+      resizeCanvas();
+      buildDots();
+      render();
+      setSheetAll();
+    } catch (err) {
+      status.textContent = 'Error: ' + err.message;
+      label.style.display = 'inline-flex';
+    }
+  });
+
+  $('btn-back').addEventListener('click', () => {
+    if (state.mode === 'route') { setMode('all'); }
+    else { window.location.reload(); }
+  });
+  $('btn-rescan').addEventListener('click', () => window.location.reload());
+
+  // ── Canvas sizing — image-space coords mapped to display ─────────────────
+  function resizeCanvas() {
+    const rect = wallImg.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width  = Math.round(rect.width  * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    canvas.style.width  = rect.width  + 'px';
+    canvas.style.height = rect.height + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  new ResizeObserver(() => { if (state.scan) { resizeCanvas(); render(); } }).observe(stage);
+  window.addEventListener('orientationchange', () => setTimeout(() => { resizeCanvas(); render(); }, 200));
+
+  // Image-space → display-space scaling (object-fit: cover crops the image,
+  // so we mirror that math here).
+  function scaling() {
+    const [iw, ih] = state.scan.image_size;
+    const rect = wallImg.getBoundingClientRect();
+    const sx = rect.width / iw, sy = rect.height / ih;
+    const scale = Math.max(sx, sy); // cover
+    const drawW = iw * scale, drawH = ih * scale;
+    const offX = (rect.width  - drawW) / 2;
+    const offY = (rect.height - drawH) / 2;
+    return { scale, offX, offY };
+  }
+
+  function toDisplay([x, y]) {
+    const { scale, offX, offY } = scaling();
+    return [x * scale + offX, y * scale + offY];
+  }
+
+  // ── Render ───────────────────────────────────────────────────────────────
+  function render() {
+    if (!state.scan) return;
+    const rect = wallImg.getBoundingClientRect();
+    ctx.clearRect(0, 0, rect.width, rect.height);
+
+    const activeRouteId = state.selectedRouteId;
+    const isRouteMode   = state.mode === 'route';
+
+    // Pass 1: dim/background strokes — draw first so active holds sit on top
+    for (const h of state.scan.holds) {
+      if (isRouteMode && h.route_id === activeRouteId) continue;
+      drawHold(h, /*active*/ false);
+    }
+    // Pass 2: active holds
+    for (const h of state.scan.holds) {
+      if (isRouteMode && h.route_id !== activeRouteId) continue;
+      if (!isRouteMode) {
+        drawHold(h, /*active*/ true);
+      } else {
+        drawHold(h, /*active*/ true);
+      }
+    }
+  }
+
+  function pathPolygon(poly) {
+    ctx.beginPath();
+    for (let i = 0; i < poly.length; i++) {
+      const [px, py] = toDisplay(poly[i]);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+  }
+
+  function outerRing(h, radius_extra, strokeStyle, lineWidth, blur) {
+    // Draw a halo ring around the hold centre, using its bbox to size the radius.
+    const [cx, cy] = toDisplay(h.center);
+    const [w, hh]  = [h.bbox[2], h.bbox[3]];
+    const { scale } = scaling();
+    const r = (Math.max(w, hh) * scale * 0.6) + radius_extra;
+    ctx.save();
+    ctx.shadowColor = strokeStyle;
+    ctx.shadowBlur  = blur;
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth   = lineWidth;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawHold(h, active) {
+    if (!h.polygon || h.polygon.length < 3) return;
+    const isRouteMode = state.mode === 'route';
+    const route       = h.route_id != null
+      ? state.scan.routes.find(r => r.id === h.route_id) : null;
+
+    ctx.save();
+    if (!isRouteMode) {
+      // "all" mode — every hold gets a white glow stroke
+      pathPolygon(h.polygon);
+      ctx.fillStyle   = 'rgba(255, 255, 255, 0.05)';
+      ctx.fill();
+      ctx.shadowColor = '#ffffff';
+      ctx.shadowBlur  = 14;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth   = 2;
+      ctx.stroke();
+      ctx.restore();
+      // Subtle role hint
+      if (h.role === 'start')  outerRing(h, 5, 'rgba(52,211,153,0.5)',  1.5, 0);
+      if (h.role === 'top')    outerRing(h, 5, 'rgba(248,113,113,0.5)', 1.5, 0);
+      if (h.role === 'start_top') {
+        outerRing(h, 5, 'rgba(52,211,153,0.5)',  1.5, 0);
+        outerRing(h, 8, 'rgba(248,113,113,0.5)', 1.5, 0);
+      }
+      return;
+    }
+
+    // "route" mode
+    if (active && route) {
+      // Active hold: filled in route colour, white glow, route hex stroke
+      pathPolygon(h.polygon);
+      ctx.fillStyle = hexA(route.hex, 0.35);
+      ctx.fill();
+      ctx.shadowColor = '#ffffff';
+      ctx.shadowBlur  = 16;
+      ctx.strokeStyle = route.hex;
+      ctx.lineWidth   = 2.5;
+      ctx.stroke();
+      ctx.restore();
+
+      if (h.role === 'start')  outerRing(h, 6, '#34d399', 3, 10);
+      else if (h.role === 'top') outerRing(h, 6, '#f87171', 3, 10);
+      else if (h.role === 'start_top') {
+        outerRing(h, 6, '#34d399', 3, 10);
+        outerRing(h, 10, '#f87171', 3, 10);
+      }
+    } else {
+      // Dimmed background hold
+      pathPolygon(h.polygon);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+      ctx.lineWidth   = 1;
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function hexA(hex, a) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, ${a})`;
+  }
+
+  // ── Hit testing ──────────────────────────────────────────────────────────
+  function pointInPolygon(x, y, poly) {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [xi, yi] = poly[i], [xj, yj] = poly[j];
+      const intersect = ((yi > y) !== (yj > y)) &&
+        (x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+
+  function holdAt(displayX, displayY) {
+    // Convert display coords → image coords using inverse cover transform.
+    const { scale, offX, offY } = scaling();
+    const ix = (displayX - offX) / scale;
+    const iy = (displayY - offY) / scale;
+    for (const h of state.scan.holds) {
+      if (!h.polygon || h.polygon.length < 3) continue;
+      if (pointInPolygon(ix, iy, h.polygon)) return h;
+    }
+    return null;
+  }
+
+  canvas.addEventListener('click', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const h = holdAt(e.clientX - rect.left, e.clientY - rect.top);
+    if (h && h.route_id != null) {
+      setMode('route', h.route_id);
+    } else if (state.mode === 'route') {
+      setMode('all');
+    }
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const h = holdAt(e.clientX - rect.left, e.clientY - rect.top);
+    if (h) {
+      tooltip.textContent = `Hold #${h.id} · ${h.role}` +
+        (h.route_id != null ? ` · route #${h.route_id + 1}` : ' · noise');
+      tooltip.style.left = (e.clientX - rect.left + 12) + 'px';
+      tooltip.style.top  = (e.clientY - rect.top  + 12) + 'px';
+      tooltip.classList.add('visible');
+    } else {
+      tooltip.classList.remove('visible');
+    }
+  });
+  canvas.addEventListener('mouseleave', () => tooltip.classList.remove('visible'));
+
+  // ── Mode + sheet ─────────────────────────────────────────────────────────
+  function setMode(mode, routeId = null) {
+    state.mode = mode;
+    state.selectedRouteId = routeId;
+    render();
+    updateDots();
+    if (mode === 'all') setSheetAll();
+    else                setSheetRoute(routeId);
+  }
+
+  function setSheetAll() {
+    const n = state.scan.routes.length;
+    $('sheet-content').innerHTML = `
+      <h2>${n} route${n === 1 ? '' : 's'} detected</h2>
+      <hr>
+      <div class="hero">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 14c1-4 11-4 12 0"/><circle cx="12" cy="9" r="3"/>
+        </svg>
+        <p>Tap a hold to select a route</p>
+        <small>Any hold in a route works</small>
+      </div>
+    `;
+  }
+
+  function setSheetRoute(routeId) {
+    const route = state.scan.routes.find(r => r.id === routeId);
+    if (!route) return;
+    $('sheet-content').innerHTML = `
+      <div class="row">
+        <h2>Route #${routeId + 1}</h2>
+        <button class="pencil" title="Edit (Phase 1.5)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          </svg>
+        </button>
+      </div>
+      <p class="sub">${route.hold_count} holds detected</p>
+      <hr>
+      <button class="add-grade">Add grade</button>
+      <button class="cta">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        Start Sending!
+      </button>
+    `;
+  }
+
+  function buildDots() {
+    const dots = $('dots');
+    dots.innerHTML = '';
+    for (let i = 0; i < state.scan.routes.length; i++) {
+      const d = document.createElement('div');
+      d.className = 'dot';
+      dots.appendChild(d);
+    }
+    updateDots();
+  }
+  function updateDots() {
+    const els = $('dots').children;
+    for (let i = 0; i < els.length; i++) {
+      els[i].classList.toggle('active', state.mode === 'route' && state.selectedRouteId === i);
+    }
+  }
+})();
+</script>
+
+</body>
+</html>
