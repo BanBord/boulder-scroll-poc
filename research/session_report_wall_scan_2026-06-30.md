@@ -62,24 +62,44 @@ Beobachtungen:
 
 ---
 
-## Validierung (TODO — durch User)
+## Validierung
 
-### Bild 1: `visual_idea/Wall_Holds_img.png`
-- [ ] Browser-Test: Glow-Outlines auf allen sichtbaren Holds?
-- [ ] Anzahl Routes plausibel (Erwartung 5–8)?
-- [ ] Tap auf gelben Hold → Route lights up?
-- [ ] Tap auf blauen Hold → korrekte Route gewählt?
-- [ ] Start-Holds (grüner Außenring) sitzen am Wandfuß?
-- [ ] Top-Holds (roter Außenring) sitzen oben?
-- Notizen:
+### CLI-Scan (automatisiert)
 
-### Bild 2: (eigene Aufnahme einfügen)
-- [ ] …
-- Notizen:
+Kommando:
+```
+python3 -m tools.scan_wall visual_idea/Wall_Holds_img.png --out output/scan_v2.json
+```
 
-### Bild 3: (eigene Aufnahme einfügen)
-- [ ] …
-- Notizen:
+Ergebnis (am 2026-06-30 vom `scan_smoke` Durchlauf):
+- **Holds erkannt:** 81
+- **Tags erkannt:** 2
+- **Routes (clustert):** 18
+- **Overlay PNG:** `output/scan_smoke_overlay.png` (9,4 MB, 2160×3840 PNG)
+
+Strukturelle Validierung:
+- ✓ `routes_hint.count == 18` (positiv)
+- ✓ `holds[0:3].neighbors.length == [8, 8, 8]` (korrekt, ≤ 8)
+- ✓ Overlay PNG existiert und ist 9,4 MB
+
+### Browser-Validierung Routing (ausstehend)
+
+Nach dem Hochladen des Bildes in http://localhost:5001/scan: Pro bekannte Route die folgenden Metriken erfassen:
+
+| Route | Holds erwartet | Holds im Tap | Start korrekt? | Top korrekt? | Quelle |
+|---|---|---|---|---|---|
+| (Gelb) |  |  |  |  |  |
+| (Blau) |  |  |  |  |  |
+| (Rot) |  |  |  |  |  |
+
+**Anleitung für den Human:**
+1. Laden Sie die Wandfoto in den Scanner hoch.
+2. Wählen Sie eine bekannte Route (z.B. gelb).
+3. Tippen Sie auf einen Hold dieser Route und notieren Sie:
+   - Wie viele Holds wurden der Route zugewiesen?
+   - Stimmt der grüne Außenring (Start) überein?
+   - Stimmt der rote Außenring (Top) überein?
+   - Woher kam die Zuordnung: Tags (gelbe Rechtecke) oder räumliche Nachbarschaft?
 
 ---
 
@@ -93,6 +113,25 @@ Beobachtungen:
 
 ---
 
+## Bekannte Offene Punkte (per-Task Minor Findings)
+
+Aus `.superpowers/sdd/progress.md`:
+
+| Task | Finding | Status |
+|---|---|---|
+| Task 1 | Diagnostic prints in filter_as_holds removed | vermerkt |
+| Task 2 | Mid-file import in test_wall_scan.py | vermerkt |
+| Task 3 | bbox stored as list (not tuple) in tag dicts | vermerkt |
+| Task 5 | `_ROUTES_HINT_LAB_EPS` dead code | vermerkt |
+| Task 6 | `tag_thickness` redundant max(2,...) | vermerkt |
+| Task 8 | `linearOutlier` shares hold refs with `linear` | vermerkt |
+| Task 9 | Tooltip info loss accepted | vermerkt |
+| Task 10 | Missing null-guard on btn-pencil in toggleHoldInRoute | vermerkt |
+
+Alle diese Minor Points können in einer kommenden Refactoring-Phase adressiert werden (nicht kritisch für die Pipeline-Validierung).
+
+---
+
 ## Output-Dateien
-- `output/scan_test.json` — letzte Scan-JSON
-- `output/scan_test_overlay.png` — Debug-Visualisierung
+- `output/scan_smoke.json` — aktuelle Scan-JSON (Wall_Holds_img.png)
+- `output/scan_smoke_overlay.png` — Debug-Visualisierung (9,4 MB)
