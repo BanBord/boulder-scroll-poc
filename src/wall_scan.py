@@ -266,6 +266,29 @@ def detect_tags(segments: List[Dict], holds: List[Dict],
     return tags
 
 
+def compute_hold_neighbors(holds: List[Dict], k: int = 8) -> List[List[int]]:
+    """For each hold, return the k closest hold IDs by centre Euclidean
+    distance. Ties broken by ascending id.
+
+    Output[i] excludes i itself. Length min(k, len(holds) - 1).
+    """
+    if not holds:
+        return []
+    centres = np.array([h["center"] for h in holds], dtype=np.float32)
+    ids     = [int(h["id"]) for h in holds]
+    n = len(holds)
+    out: List[List[int]] = []
+    for i in range(n):
+        d = np.linalg.norm(centres - centres[i], axis=1)
+        # Sort by (distance, id) to break ties deterministically.
+        order = sorted(
+            (j for j in range(n) if j != i),
+            key=lambda j: (float(d[j]), ids[j]),
+        )
+        out.append([ids[j] for j in order[:k]])
+    return out
+
+
 def _lab_to_hex(lab: Tuple[float, float, float]) -> str:
     """OpenCV-encoded Lab (L: 0..255, a/b: 0..255 offset 128) → sRGB hex."""
     lab_u8 = np.array([[[int(round(lab[0])), int(round(lab[1])), int(round(lab[2]))]]],

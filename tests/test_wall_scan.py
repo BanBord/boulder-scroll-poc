@@ -289,3 +289,39 @@ def test_detect_tags_empty_when_no_holds():
     segments = [{"segmentation": seg, "bbox": (200, 200, 60, 30)}]
     tags = detect_tags(segments, [], frame)
     assert tags == []
+
+
+# ── compute_hold_neighbors ────────────────────────────────────────────────────
+
+def test_compute_neighbors_orders_by_distance():
+    from src.wall_scan import compute_hold_neighbors
+    # Holds laid out in a row at x = 0, 10, 30, 60, 100
+    holds = [
+        {"id": 0, "center": (0.0,   100.0)},
+        {"id": 1, "center": (10.0,  100.0)},
+        {"id": 2, "center": (30.0,  100.0)},
+        {"id": 3, "center": (60.0,  100.0)},
+        {"id": 4, "center": (100.0, 100.0)},
+    ]
+    nb = compute_hold_neighbors(holds, k=3)
+    # Hold 0's nearest: 1 (10), 2 (30), 3 (60)
+    assert nb[0] == [1, 2, 3]
+    # Hold 2's nearest: 1 (20), 3 (30), 0 (30) — 0 and 3 are tied at 30,
+    # ties broken by id ascending → 0 before 3
+    assert nb[2] == [1, 0, 3]
+
+
+def test_compute_neighbors_clamps_k_to_available():
+    from src.wall_scan import compute_hold_neighbors
+    holds = [
+        {"id": 0, "center": (0.0, 0.0)},
+        {"id": 1, "center": (1.0, 0.0)},
+    ]
+    nb = compute_hold_neighbors(holds, k=8)
+    assert nb[0] == [1]
+    assert nb[1] == [0]
+
+
+def test_compute_neighbors_empty():
+    from src.wall_scan import compute_hold_neighbors
+    assert compute_hold_neighbors([], k=8) == []
