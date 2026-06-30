@@ -157,6 +157,11 @@ body { min-height: 100vh; min-height: 100svh; display: flex; justify-content: ce
   opacity: 0; transition: opacity 0.12s ease;
 }
 .hold-tooltip.visible { opacity: 1; }
+
+/* Edit mode indicator */
+body.edit-mode .stage { box-shadow: inset 0 0 0 2px #34d399; }
+body.edit-mode .scanned-chip { background: #34d399; color: #0b0b0c; }
+body.edit-mode .scanned-chip svg { color: #0b0b0c; }
 </style>
 </head>
 <body>
@@ -525,8 +530,63 @@ import {
     document.getElementById('btn-pencil').addEventListener('click', togglePencil);
   }
 
-  function togglePencil()         { /* Task 10 */ }
-  function toggleHoldInRoute(_id) { /* Task 10 */ }
+  const CORRECTIONS_KEY = 'climbrr_corrections';
+
+  function togglePencil() {
+    if (state.mode !== 'route') return;
+    state.editMode = !state.editMode;
+    document.body.classList.toggle('edit-mode', state.editMode);
+    const btn = document.getElementById('btn-pencil');
+    if (btn) btn.style.color = state.editMode ? '#34d399' : '';
+  }
+
+  function toggleHoldInRoute(holdId) {
+    const ids = state.selectedRouteIds;
+    if (!ids) return;
+    const anchor = state.scan.holds.find(h => h.id === state.anchorId);
+    const hold   = state.scan.holds.find(h => h.id === holdId);
+    if (!anchor || !hold) return;
+
+    const dA = hold.color_lab[1] - anchor.color_lab[1];
+    const dB = hold.color_lab[2] - anchor.color_lab[2];
+    const dAB = Math.sqrt(dA * dA + dB * dB);
+    const [W, H] = state.scan.image_size;
+    const diag = Math.sqrt(W * W + H * H);
+    const dx = hold.center[0] - anchor.center[0];
+    const dy = hold.center[1] - anchor.center[1];
+    const dSpatial = Math.sqrt(dx * dx + dy * dy) / diag;
+
+    const action = ids.has(holdId) ? 'remove' : 'add';
+    if (action === 'add')    ids.add(holdId);
+    else                     ids.delete(holdId);
+
+    logCorrection({action, anchorId: state.anchorId, holdId, dAB, dSpatial});
+
+    // Recompute start/top from the modified route — keep the user's view truthful.
+    const {startIds, topId, source} = assignStartTop({
+      routeIds: ids,
+      tags: state.scan.tags,
+      holds: state.scan.holds,
+      imageSize: state.scan.image_size,
+    });
+    state.startIds = startIds || [];
+    state.topId = topId;
+    state.source = source;
+    render();
+    setSheetRoute();
+    document.getElementById('btn-pencil').style.color = '#34d399';
+  }
+
+  function logCorrection(entry) {
+    let arr = [];
+    try { arr = JSON.parse(localStorage.getItem(CORRECTIONS_KEY) || '[]'); }
+    catch { arr = []; }
+    entry.ts = Date.now();
+    arr.push(entry);
+    // Cap at 1000 so we don't bloat localStorage.
+    if (arr.length > 1000) arr = arr.slice(-1000);
+    localStorage.setItem(CORRECTIONS_KEY, JSON.stringify(arr));
+  }
 </script>
 
 </body>
