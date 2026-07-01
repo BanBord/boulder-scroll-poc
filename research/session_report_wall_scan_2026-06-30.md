@@ -88,9 +88,9 @@ Nach dem Hochladen des Bildes in http://localhost:5001/scan: Pro bekannte Route 
 
 | Route | Holds erwartet | Holds im Tap | Start korrekt? | Top korrekt? | Quelle |
 |---|---|---|---|---|---|
-| (Gelb) |  |  |  |  |  |
-| (Blau) |  |  |  |  |  |
-| (Rot) |  |  |  |  |  |
+| (Gelb) | keine Holds erwartet | keine geleben holds makiert(alle ausgelassen) | nein| nein |/Users/brunogross/Documents/Studium/01_semester/6_semester/1_lean_design/lean_after_reframing/scrolling-poc/visual_idea/Wall_Holds_img.png  |
+| (Blau) | 18 |  18| nein | ja |/Users/brunogross/Documents/Studium/01_semester/6_semester/1_lean_design/lean_after_reframing/scrolling-poc/visual_idea/Wall_Holds_img.png  |
+| (Rot) | keine holds erwartet | random holds erkannt | nein |  nein| /Users/brunogross/Documents/Studium/01_semester/6_semester/1_lean_design/lean_after_reframing/scrolling-poc/visual_idea/Wall_Holds_img.png |
 
 **Anleitung für den Human:**
 1. Laden Sie die Wandfoto in den Scanner hoch.
