@@ -126,13 +126,14 @@ def serve_scan_selection_module():
                                mimetype="application/javascript")
 
 
-@app.route("/scan", methods=["POST"])
-def scan_image():
-    """Take an uploaded wall photo, run wall_scan synchronously, write JSON.
+@app.route("/scan_preprocess", methods=["POST"])
+def scan_preprocess():
+    """Phase 1: take an uploaded wall photo, run contrast-stretch + region-
+    flattening immediately, write the result to disk.
 
-    Returns ``{scan_id, image_url, json_url}``. The synchronous path keeps the
-    Phase-1 flow simple — MobileSAM on a phone-sized photo is ~10 s, fine for
-    a single button-click.
+    Returns ``{scan_id, preview_url}`` fast (~4 s on a 4K photo) — the slow
+    MobileSAM step is a separate ``/scan_run/<scan_id>`` call, so the user
+    sees the preprocessed preview before committing to the ~10 s scan.
     """
     img_file = request.files.get("image")
     if img_file is None:
@@ -142,15 +143,42 @@ def scan_image():
     ext = os.path.splitext(img_file.filename)[1].lower() or ".jpg"
     if ext not in (".jpg", ".jpeg", ".png"):
         return jsonify({"error": f"unsupported image type: {ext}"}), 400
-    image_path = os.path.join(UPLOAD_DIR, f"{scan_id}_wall{ext}")
-    img_file.save(image_path)
+    raw_path = os.path.join(UPLOAD_DIR, f"{scan_id}_wall_raw{ext}")
+    img_file.save(raw_path)
+
+    preprocessed_path = os.path.join(UPLOAD_DIR, f"{scan_id}_wall_preprocessed.png")
+    try:
+        from src.wall_scan import preprocess_image
+        preprocess_image(raw_path, preprocessed_path)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    return jsonify({
+        "scan_id":    scan_id,
+        "preview_url": f"/uploads/{os.path.basename(preprocessed_path)}",
+    })
+
+
+@app.route("/scan_run/<scan_id>", methods=["POST"])
+def scan_run(scan_id):
+    """Phase 2: run the (slow) MobileSAM scan on the already-preprocessed
+    image from a prior ``/scan_preprocess`` call.
+
+    Returns ``{scan_id, image_url, json_url}``, same shape as the old
+    single-phase ``/scan`` endpoint.
+    """
+    preprocessed_path = os.path.join(UPLOAD_DIR, f"{scan_id}_wall_preprocessed.png")
+    if not os.path.exists(preprocessed_path):
+        return jsonify({"error": f"no preprocessed image for scan_id {scan_id} "
+                                  f"— call /scan_preprocess first"}), 404
 
     try:
         from src.wall_scan import scan, write_scan_json
-        scan_dict = scan(image_path)
+        raw_dump_path = os.path.join(OUTPUT_DIR, f"{scan_id}_sam_raw.json")
+        scan_dict = scan(preprocessed_path, raw_dump_path=raw_dump_path)
         json_path = os.path.join(OUTPUT_DIR, f"{scan_id}_scan.json")
         # Rewrite image path to a server-relative URL so the viewer can find it.
-        scan_dict["image"] = f"/uploads/{os.path.basename(image_path)}"
+        scan_dict["image"] = f"/uploads/{os.path.basename(preprocessed_path)}"
         write_scan_json(scan_dict, json_path)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
@@ -159,6 +187,7 @@ def scan_image():
         "scan_id":   scan_id,
         "image_url": scan_dict["image"],
         "json_url":  f"/scan_json/{scan_id}",
+        "sam_raw_url": f"/scan_raw/{scan_id}",
         "summary":   {
             "holds":       len(scan_dict["holds"]),
             "tags":        len(scan_dict["tags"]),
@@ -170,6 +199,14 @@ def scan_image():
 @app.route("/scan_json/<scan_id>")
 def serve_scan_json(scan_id):
     return send_from_directory(OUTPUT_DIR, f"{scan_id}_scan.json",
+                               mimetype="application/json")
+
+
+@app.route("/scan_raw/<scan_id>")
+def serve_scan_raw(scan_id):
+    """Raw SAM segment dump (pre hold/tag filtering) — debug artifact, see
+    src.wall_scan.dump_raw_sam_segments()."""
+    return send_from_directory(OUTPUT_DIR, f"{scan_id}_sam_raw.json",
                                mimetype="application/json")
 
 

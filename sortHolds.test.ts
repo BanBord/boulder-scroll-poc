@@ -8,6 +8,7 @@ function eq(a: unknown, b: unknown, msg?: string) {
   const sa = JSON.stringify(a), sb = JSON.stringify(b);
   if (sa !== sb) throw new Error(`${msg || "expected equal"}\n  got: ${sa}\n  exp: ${sb}`);
 }
+function ok(x: unknown, msg?: string) { if (!x) throw new Error(msg || "expected truthy"); }
 
 function mkHold(id: number, bbox: THold["bbox"]): THold {
   return {
@@ -63,8 +64,6 @@ it("handles a single-hold array", () => {
   const a = mkHold(0, [1, 2, 3, 4]);
   eq(sortHoldsBottomToTop([a]).map(h => h.id), [0]);
 });
-
-function ok(x: unknown, msg?: string) { if (!x) throw new Error(msg || "expected truthy"); }
 
 let pass = 0;
 for (const c of cases) {

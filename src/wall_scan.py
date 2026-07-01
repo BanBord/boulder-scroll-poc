@@ -282,9 +282,37 @@ def assemble_scan_payload(*, image_path: str, image_size: Tuple[int, int],
     }
 
 
+def preprocess_image(image_path: str, output_path: str) -> Tuple[int, int]:
+    """Phase 1: contrast stretch + region flattening, written to disk.
+
+    Runs immediately on upload, ahead of (and independent from) the slow SAM
+    scan in ``scan()`` — see the ``/scan_preprocess`` / ``/scan_run`` split in
+    app.py. Returns the processed image's (width, height).
+    """
+    from .preprocess import stretch_contrast, flatten_regions
+
+    frame = cv2.imread(image_path)
+    if frame is None:
+        raise RuntimeError(f"cannot read image: {image_path}")
+    frame = stretch_contrast(frame)
+    frame = flatten_regions(frame)
+    cv2.imwrite(output_path, frame)
+    h_img, w_img = frame.shape[:2]
+    return w_img, h_img
+
+
 def scan(image_path: str, *, mat_zone_frac: float = 1.0,
-         points_per_side: int = _SAM_POINTS_PER_SIDE) -> Dict:
-    """Run the full wall scan on a single image."""
+         points_per_side: int = _SAM_POINTS_PER_SIDE,
+         raw_dump_path: Optional[str] = None) -> Dict:
+    """Phase 2: run the full wall scan on an already-preprocessed image.
+
+    ``image_path`` is expected to have already gone through
+    ``preprocess_image()`` — this function no longer preprocesses on its own.
+
+    raw_dump_path: if given, write every raw SAM segment (pre hold/tag
+    filtering) to this path via dump_raw_sam_segments() — a debug artifact,
+    not part of the returned schema.
+    """
     from .hold_detector import run_sam_segments, filter_as_holds
 
     frame = cv2.imread(image_path)
@@ -293,6 +321,8 @@ def scan(image_path: str, *, mat_zone_frac: float = 1.0,
     h_img, w_img = frame.shape[:2]
 
     segments = run_sam_segments(frame, points_per_side=points_per_side)
+    if raw_dump_path:
+        dump_raw_sam_segments(segments, raw_dump_path)
     holds = filter_as_holds(segments, frame, color_filter=None,
                             mat_zone_frac=mat_zone_frac)
     tags  = detect_tags(segments, holds, frame)
@@ -318,6 +348,31 @@ def scan(image_path: str, *, mat_zone_frac: float = 1.0,
 def write_scan_json(scan_dict: Dict, out_path: str) -> None:
     with open(out_path, "w") as f:
         json.dump(scan_dict, f, indent=2)
+
+
+def dump_raw_sam_segments(segments: List[Dict], out_path: str) -> None:
+    """Write raw SAM segment metadata to JSON, one entry per segment in
+    generation order.
+
+    Excludes the ``segmentation`` boolean mask (a full-frame array per
+    segment — hundreds of MB across a typical scan) but keeps every other
+    field SAM's ``AutomaticMaskGenerator`` returns, including
+    ``predicted_iou`` and ``stability_score`` which the hold/tag filter
+    chain currently discards after generation.
+    """
+    rows = []
+    for i, s in enumerate(segments):
+        rows.append({
+            "index":           i,
+            "bbox":            [int(v) for v in s["bbox"]],
+            "area":            int(s["area"]),
+            "predicted_iou":   float(s["predicted_iou"]),
+            "stability_score": float(s["stability_score"]),
+            "point_coords":    [[float(x), float(y)] for x, y in s["point_coords"]],
+            "crop_box":        [int(v) for v in s["crop_box"]],
+        })
+    with open(out_path, "w") as f:
+        json.dump(rows, f, indent=2)
 
 
 # ── Debug overlay ──────────────────────────────────────────────────────────
