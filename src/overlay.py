@@ -1,3 +1,6 @@
+"""Frame overlays: the legacy center-of-mass dot, the skeleton + CoM trail, and
+the balance panel drawn on top of the reframed output."""
+
 import cv2
 import numpy as np
 

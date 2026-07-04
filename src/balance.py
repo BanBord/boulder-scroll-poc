@@ -1,7 +1,14 @@
-# src/balance.py
+"""Spring-damper physics for the balance-tower visualisation.
+
+``PhysicsState`` integrates arm/leg/CoM markers toward their targets with
+per-state stiffness and damping, classifying the climber as stable / unstable /
+fallen from the recent variance of the CoM signal.
+"""
+
 from collections import deque
-import numpy as np
 from typing import Dict
+
+import numpy as np
 
 _VARIANCE_WINDOW = 30
 _VARIANCE_UNSTABLE = 8.0

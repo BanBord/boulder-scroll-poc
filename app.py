@@ -5,13 +5,15 @@ import json
 
 from flask import Flask, request, jsonify, send_from_directory
 
+from src import config
+
 app = Flask(__name__)
 
 _jobs: dict = {}
 _lock = threading.Lock()
 
-UPLOAD_DIR = "uploads"
-OUTPUT_DIR = "output"
+UPLOAD_DIR = config.UPLOAD_DIR
+OUTPUT_DIR = config.OUTPUT_DIR
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -29,8 +31,8 @@ def serve_output(filename):
 @app.route("/render", methods=["POST"])
 def render():
     video_file = request.files.get("video")
-    fill          = float(request.form.get("fill",     0.65))
-    alpha         = float(request.form.get("alpha",    0.10))
+    fill          = float(request.form.get("fill",     config.DEFAULT_FILL))
+    alpha         = float(request.form.get("alpha",    config.DEFAULT_ALPHA))
     preview_secs  = float(request.form.get("preview",  0))
     show_skeleton = request.form.get("skeleton",     "false").lower() in ("true", "1", "on")
     track_holds   = request.form.get("track_holds",  "false").lower() in ("true", "1", "on")
@@ -71,7 +73,7 @@ def _run(job_id, input_path, output_path, balance_path,
         pipeline_run(
             input_path=input_path,
             output_path=output_path,
-            out_w=540, out_h=960,
+            out_w=config.OUT_W, out_h=config.OUT_H,
             smoothing_alpha=alpha,
             person_fill=fill,
             show_com=False,

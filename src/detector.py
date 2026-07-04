@@ -1,6 +1,13 @@
+"""YOLO pose detection wrapper: person bbox, hip centre, and center of mass.
+
+Wraps a single ultralytics YOLO pose model and exposes the specific queries the
+pipeline needs (calibration sampling, per-frame hip/CoM), computing CoM as a
+mass-weighted average of the confident COCO keypoints.
+"""
+
 import cv2
-from ultralytics import YOLO
 import numpy as np
+from ultralytics import YOLO
 
 # COCO keypoint weights for Center of Mass approximation
 # Based on approximate body segment mass fractions

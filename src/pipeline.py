@@ -1,15 +1,27 @@
-import cv2
+"""Video reframing pipeline: pose-track a climber and render a portrait crop.
+
+Two passes over the source video:
+  1. Calibration — sample frames to fix the crop window size and vertical anchor
+     (constant focal length; only the crop *position* tracks the climber).
+  2. Main pass — per frame, detect the hip/CoM, smooth its position, crop, and
+     draw the optional skeleton / balance overlays, writing the output video plus
+     optional JSON sidecars (balance signals, hold-contact timeline, route).
+"""
+
 import json
 import os
-import numpy as np
 from collections import deque
+
+import cv2
+import numpy as np
 from tqdm import tqdm
 
+from . import config
 from .detector import Detector
-from .reframer import smooth_position, crop_fixed, transform_keypoints
+from .reframer import smooth_position, crop_fixed, transform_keypoints, output_transform
 from .overlay import draw_com, draw_skeleton
 
-TRAIL_LEN = 40   # frames of CoM history to show
+TRAIL_LEN = config.TRAIL_LEN   # frames of CoM history to show
 
 
 def _balance_data(
@@ -53,13 +65,54 @@ def _balance_data(
     return {"arm": arm_sig, "leg": leg_sig, "com": com_off}
 
 
+def _write_balance_json(path: str, fps: float, frames: list) -> None:
+    """Write the per-frame CoM balance signals sidecar."""
+    with open(path, "w") as f:
+        json.dump({"fps": fps, "frames": frames}, f, separators=(",", ":"))
+    print(f"Balance JSON → {path}")
+
+
+def _write_timeline_and_route(
+    output_path: str, fps: float, src_w: int, src_h: int, holds: list, frames: list
+) -> None:
+    """Write the hold-contact timeline sidecar and derive the route from it.
+
+    The route aggregation is best-effort: if there isn't enough contact data it
+    raises ``RuntimeError``, which we log and swallow.
+    """
+    timeline_path = os.path.splitext(output_path)[0] + "_timeline.json"
+    timeline = {
+        "fps": fps,
+        "video_size": [src_w, src_h],
+        "holds": [
+            {"id": h["id"], "center": list(h["center"]), "bbox": list(h["bbox"])}
+            for h in holds
+        ],
+        "frames": frames,
+    }
+    with open(timeline_path, "w") as f:
+        json.dump(timeline, f)
+    print(f"Timeline → {timeline_path}")
+
+    from .route_aggregator import aggregate
+    try:
+        route_path = aggregate(timeline_path)
+        with open(route_path) as rf:
+            route_json = json.load(rf)
+        print(f"[route] start=h{route_json.get('start_hold_id')} "
+              f"top=h{route_json.get('top_hold_id')} "
+              f"route_holds={len(route_json.get('holds', []))} → {route_path}")
+    except RuntimeError as e:
+        print(f"[route] aggregation skipped: {e}")
+
+
 def run(
     input_path: str,
     output_path: str,
     out_w: int,
     out_h: int,
     smoothing_alpha: float,
-    person_fill: float = 0.65,
+    person_fill: float = config.PERSON_FILL,
     show_com: bool = False,
     show_skeleton: bool = False,
     show_balance: bool = False,
@@ -82,6 +135,8 @@ def run(
     # --- Hold detection (optional, runs once on reference frame) ---
     holds = []
     if track_holds:
+        # Lazy imports: hold detection pulls in MobileSAM and its heavy deps, so
+        # keep them out of the import path for the common (no-holds) case.
         from .hold_detector import detect_holds, pick_clean_frame
         from .contact import check_contacts
         from .grab_clusters import build_trajectory_prior, filter_holds_by_clusters, hold_match_distance
@@ -175,11 +230,10 @@ def run(
         cropped = crop_fixed(frame, smooth_cx, smooth_cy, fixed_crop_w, fixed_crop_h, out_w, out_h)
 
         if show_skeleton:
-            # Coordinate transform helper
-            x1 = smooth_cx - fixed_crop_w / 2
-            y1 = smooth_cy - fixed_crop_h / 2
-            sx = out_w / fixed_crop_w
-            sy = out_h / fixed_crop_h
+            # Source → output coordinate transform for this frame's crop window
+            x1, y1, sx, sy = output_transform(
+                smooth_cx, smooth_cy, fixed_crop_w, fixed_crop_h, out_w, out_h
+            )
 
             def to_out(px, py):
                 return ((px - x1) * sx, (py - y1) * sy)
@@ -211,10 +265,9 @@ def run(
             if not show_skeleton:
                 com_out = None
                 if com_src is not None:
-                    x1_b = smooth_cx - fixed_crop_w / 2
-                    y1_b = smooth_cy - fixed_crop_h / 2
-                    sx_b = out_w / fixed_crop_w
-                    sy_b = out_h / fixed_crop_h
+                    x1_b, y1_b, sx_b, sy_b = output_transform(
+                        smooth_cx, smooth_cy, fixed_crop_w, fixed_crop_h, out_w, out_h
+                    )
                     com_out = ((com_src[0] - x1_b) * sx_b, (com_src[1] - y1_b) * sy_b)
 
             kps_out_bal = None
@@ -238,29 +291,7 @@ def run(
     # Write balance JSON sidecar
     if _balance_frames is not None:
         out_json = balance_json_path or (output_path.rsplit(".", 1)[0] + "_balance.json")
-        with open(out_json, "w") as f:
-            json.dump({"fps": fps, "frames": _balance_frames}, f, separators=(",", ":"))
-        print(f"Balance JSON → {out_json}")
+        _write_balance_json(out_json, fps, _balance_frames)
 
     if track_holds and holds:
-        timeline_path = os.path.splitext(output_path)[0] + "_timeline.json"
-        timeline = {
-            "fps": fps,
-            "video_size": [src_w, src_h],
-            "holds": [{"id": h["id"], "center": list(h["center"]), "bbox": list(h["bbox"])} for h in holds],
-            "frames": timeline_frames,
-        }
-        with open(timeline_path, "w") as f:
-            json.dump(timeline, f)
-        print(f"Timeline → {timeline_path}")
-
-        from .route_aggregator import aggregate
-        try:
-            route_path = aggregate(timeline_path)
-            with open(route_path) as rf:
-                route_json = json.load(rf)
-            print(f"[route] start=h{route_json.get('start_hold_id')} "
-                  f"top=h{route_json.get('top_hold_id')} "
-                  f"route_holds={len(route_json.get('holds', []))} → {route_path}")
-        except RuntimeError as e:
-            print(f"[route] aggregation skipped: {e}")
+        _write_timeline_and_route(output_path, fps, src_w, src_h, holds, timeline_frames)
