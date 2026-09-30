@@ -1,7 +1,15 @@
+"""Hold detection on a reference video frame via MobileSAM.
+
+Downloads/caches the MobileSAM checkpoint on first use, segments candidate holds
+in a clean reference frame, and returns each hold's mask, bbox, centre and
+colour for downstream contact tracking.
+"""
+
 import os
+from typing import List, Dict, Optional, Tuple
+
 import cv2
 import numpy as np
-from typing import List, Dict, Optional, Tuple
 
 _CHECKPOINT_URL  = "https://github.com/ChaoningZhang/MobileSAM/releases/download/v1.0/mobile_sam.pt"
 _CHECKPOINT_PATH = os.path.expanduser("~/.cache/mobile_sam/mobile_sam.pt")

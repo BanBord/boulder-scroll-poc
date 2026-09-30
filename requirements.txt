@@ -1,6 +1,14 @@
-ultralytics>=8.0
-opencv-python>=4.8
+# Runtime dependencies for Boulder Scroll.
+# Lower bounds are the versions this POC has been run against; unpinned upper
+# bounds are intentional for a research project.
+
+ultralytics>=8.0      # YOLOv8 pose model (src/detector.py)
+opencv-python>=4.8     # video I/O, image ops
 numpy>=1.24
-tqdm>=4.65
-flask>=3.0
+tqdm>=4.65             # progress bars
+flask>=3.0             # web app (app.py)
+
+# MobileSAM — hold segmentation for the wall scan (src/hold_detector.py,
+# src/wall_scan.py). Published to PyPI as `mobile-sam`; the model checkpoint is
+# downloaded/cached on first use from the MobileSAM GitHub release.
 mobile-sam

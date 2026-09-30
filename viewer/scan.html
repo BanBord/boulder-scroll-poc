@@ -255,16 +255,24 @@ import {
     const label  = $('upload-label');
     const status = $('upload-status');
     label.style.display = 'none';
-    status.innerHTML = '<div class="upload-spinner"></div><div style="margin-top:10px">Scanning…</div>';
+    status.innerHTML = '<div class="upload-spinner"></div><div style="margin-top:10px">Preprocessing…</div>';
 
     const fd = new FormData();
     fd.append('image', f);
     try {
-      const resp = await fetch('/scan', { method: 'POST', body: fd });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || 'scan failed');
-      wallImg.src = data.image_url;
+      // Phase 1: contrast stretch + region flattening — fast, shows a preview
+      // before the slow SAM scan starts.
+      const preResp = await fetch('/scan_preprocess', { method: 'POST', body: fd });
+      const preData = await preResp.json();
+      if (!preResp.ok) throw new Error(preData.error || 'preprocessing failed');
+      wallImg.src = preData.preview_url;
       await new Promise(r => wallImg.onload = r);
+      status.innerHTML = '<div class="upload-spinner"></div><div style="margin-top:10px">Scanning…</div>';
+
+      // Phase 2: MobileSAM scan on the preprocessed image.
+      const runResp = await fetch(`/scan_run/${preData.scan_id}`, { method: 'POST' });
+      const data = await runResp.json();
+      if (!runResp.ok) throw new Error(data.error || 'scan failed');
       const scanResp = await fetch(data.json_url);
       state.scan = await scanResp.json();
       $('upload-landing').style.display = 'none';

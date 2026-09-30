@@ -1,5 +1,32 @@
+"""Reframing primitives: smooth a tracked point and crop a fixed window.
+
+Constant focal length — the crop window keeps its dimensions and only its centre
+moves, so every mapping from source-frame to output-frame coords uses the same
+affine transform (see :func:`output_transform`).
+"""
+
 import cv2
 import numpy as np
+
+
+def output_transform(
+    cx: float,
+    cy: float,
+    crop_w: int,
+    crop_h: int,
+    out_w: int,
+    out_h: int,
+) -> tuple[float, float, float, float]:
+    """Return ``(x1, y1, sx, sy)`` mapping source coords to output coords for the
+    crop window centred on ``(cx, cy)`` — the same window :func:`crop_fixed` uses.
+
+    A source point ``(px, py)`` maps to ``((px - x1) * sx, (py - y1) * sy)``.
+    """
+    x1 = cx - crop_w / 2
+    y1 = cy - crop_h / 2
+    sx = out_w / crop_w
+    sy = out_h / crop_h
+    return x1, y1, sx, sy
 
 
 def smooth_position(
@@ -70,10 +97,7 @@ def transform_keypoints(
     Map YOLO keypoints from source-frame coords to output-frame coords,
     matching the same crop window used by crop_fixed().
     """
-    x1 = cx - crop_w / 2
-    y1 = cy - crop_h / 2
-    sx = out_w / crop_w
-    sy = out_h / crop_h
+    x1, y1, sx, sy = output_transform(cx, cy, crop_w, crop_h, out_w, out_h)
     out = keypoints.copy().astype(float)
     out[:, 0] = (keypoints[:, 0] - x1) * sx
     out[:, 1] = (keypoints[:, 1] - y1) * sy

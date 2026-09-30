@@ -1,5 +1,12 @@
-import numpy as np
+"""Limb-to-hold contact detection: which hold (if any) each hand/foot touches.
+
+A limb touches a hold when its keypoint pixel falls inside that hold's SAM mask;
+all coordinates are in source-frame space.
+"""
+
 from typing import Dict, List, Optional
+
+import numpy as np
 
 # COCO keypoint indices for limb endpoints
 LIMBS: Dict[str, int] = {
