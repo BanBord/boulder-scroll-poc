@@ -61,6 +61,7 @@ def main() -> None:
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--cell", type=int, default=12, help="silhouette grid cell in px")
     ap.add_argument("--eps", type=float, default=1.5, help="polygon simplification in px")
+    ap.add_argument("--route-color", help="override which hold colour counts as the route")
     a = ap.parse_args()
 
     with open(a.reading, encoding="utf-8") as f:
@@ -74,7 +75,7 @@ def main() -> None:
         poly = hold_polygon(masks[h["id"]], a.eps) if h["id"] in masks else []
         if poly:
             holds.append({"id": h["id"], "i": h["index"], "s": round(h["score"] or 0, 2),
-                          "r": 1 if h["route"] else 0, "c": h["color"], "p": poly})
+                          "r": 1 if (h["color"] == a.route_color if a.route_color else h["route"]) else 0, "c": h["color"], "p": poly})
 
     contacts = [{"l": LIMB[c["limb"]], "h": c["hold_id"], "a": c["f_start"], "b": c["f_end"]}
                 for c in r["contacts"]]
